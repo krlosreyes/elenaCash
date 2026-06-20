@@ -5,7 +5,7 @@ import 'package:equatable/equatable.dart';
 class FastLaneEntity extends Equatable {
   final String userId;
   final int fastLaneScore;          // 0–100
-  final FastLaneRoadmap roadmap;    // arcen | via_lenta | via_rapida
+  final FastLaneRoadmap roadmap;    // sinRumbo | viaLenta | viaRapida
   final double activeIncomeMonthly;
   final double passiveIncomeMonthly;
   final List<MoneyTreeBranch> moneyTreeBranches;
@@ -14,7 +14,7 @@ class FastLaneEntity extends Equatable {
   const FastLaneEntity({
     required this.userId,
     this.fastLaneScore = 0,
-    this.roadmap = FastLaneRoadmap.viaLenta,
+    this.roadmap = FastLaneRoadmap.sinRumbo,
     this.activeIncomeMonthly = 0,
     this.passiveIncomeMonthly = 0,
     this.moneyTreeBranches = const [],
@@ -29,7 +29,7 @@ class FastLaneEntity extends Equatable {
   }
 
   String get roadmapLabel => switch (roadmap) {
-    FastLaneRoadmap.arcen => 'Arcén',
+    FastLaneRoadmap.sinRumbo => 'Sin Rumbo',
     FastLaneRoadmap.viaLenta => 'Vía Lenta',
     FastLaneRoadmap.viaRapida => 'Vía Rápida',
     FastLaneRoadmap.elite => 'Elite',
@@ -47,7 +47,7 @@ class FastLaneEntity extends Equatable {
   List<Object?> get props => [userId, fastLaneScore, passiveIncomeMonthly];
 }
 
-enum FastLaneRoadmap { arcen, viaLenta, viaRapida, elite }
+enum FastLaneRoadmap { sinRumbo, viaLenta, viaRapida, elite }
 
 /// Una rama del Árbol del Dinero — fuente de ingreso adicional.
 class MoneyTreeBranch extends Equatable {
@@ -121,7 +121,7 @@ extension BranchTypeX on BranchType {
 
 extension FastLaneRoadmapX on FastLaneRoadmap {
   String get label => switch (this) {
-    FastLaneRoadmap.arcen => 'Arcén',
+    FastLaneRoadmap.sinRumbo => 'Sin Rumbo',
     FastLaneRoadmap.viaLenta => 'Vía Lenta',
     FastLaneRoadmap.viaRapida => 'Vía Rápida',
     FastLaneRoadmap.elite => 'Élite',

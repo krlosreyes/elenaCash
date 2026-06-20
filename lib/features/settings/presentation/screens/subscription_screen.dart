@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
@@ -132,13 +134,46 @@ class SubscriptionScreen extends ConsumerWidget {
   }
 
   void _subscribe(BuildContext context, String plan) {
-    // TODO: RevenueCat purchase flow
+    if (kIsWeb) {
+      // RevenueCat no soporta Flutter Web; redirigir a la tienda de apps
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Suscripción Premium'),
+          content: const Text(
+            'Para suscribirte a ElenaCash Premium, descarga la app '
+            'en tu dispositivo móvil (iOS o Android) y gestiona tu '
+            'suscripción desde ahí.\n\n'
+            'Si ya tienes una suscripción activa en tu dispositivo, '
+            'tu cuenta Premium se reflejará aquí automáticamente.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => ctx.pop(),
+              child: const Text('Entendido'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                ctx.pop();
+                final uri = Uri.parse('https://elenacash.app');
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+              child: const Text('Ver más info'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Mobile: RevenueCat purchase flow
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Iniciando compra de plan $plan...'),
         backgroundColor: AppColors.primary,
       ),
     );
+    // TODO (mobile): Purchases.purchaseProduct(AppConstants.premiumMonthlyId)
   }
 }
 

@@ -3,28 +3,28 @@ import '../domain/entities/lesson_entity.dart';
 /// Lecciones semilla — las primeras 20 lecciones integradas en el build.
 /// Las adicionales se cargan desde Firestore (colección: education/).
 final List<LessonEntity> seedLessons = [
-  // ── Semana 1: El Arcén ────────────────────────────────────────
+  // ── Semana 1: Sin Rumbo ───────────────────────────────────────────
   LessonEntity(
-    id: 'w1_l1_arce_n',
-    title: '¿Estás en el Arcén sin saberlo?',
-    slug: 'arce-n-diagnostico',
+    id: 'w1_l1_sin_rumbo',
+    title: '¿Estás Sin Rumbo financiero sin saberlo?',
+    slug: 'sin-rumbo-diagnostico',
     source: LessonSource.demarco,
     category: LessonCategory.mindset,
     order: 1,
     readingSeconds: 90,
-    keyTakeaway: 'El Arcén no es falta de dinero — es falta de sistema.',
+    keyTakeaway: 'Estar "sin rumbo" no es falta de dinero — es falta de sistema.',
     content: '''
 ## El diagnóstico que nadie quiere hacer
 
 MJ DeMarco describe tres tipos de personas con el dinero:
 
-**El Arcén:** Vive el hoy, sin plan. "Si tengo plata, gasto. Si no, me endeudo." El dinero llega y desaparece. No es maldad — es ausencia de sistema.
+**El Sin Rumbo:** Vive el hoy, sin plan. "Si tengo plata, gasto. Si no, me endeudo." El dinero llega y desaparece. No es maldad — es ausencia de sistema.
 
 **La Vía Lenta:** Trabaja duro, ahorra el 10%, espera 40 años. El problema matemático: si ahorras el 10% de tu ingreso, necesitas 9 años de trabajo para tener 1 año de ahorro. A los 65 "llegaste".
 
 **La Vía Rápida:** Construye sistemas que generan valor para muchas personas. El dinero trabaja para ti, no al revés.
 
-La mayoría de personas está en el Arcén *creyendo* que está en la Vía Lenta.
+La mayoría de personas está en el Sin Rumbo *creyendo* que está en la Vía Lenta.
 
 **¿En cuál estás tú?**
 ''',
@@ -105,7 +105,7 @@ Para alguien, una vida rica es viajar tres meses al año sin mirar el precio. Pa
 
 **No hay respuesta correcta.** El error es adoptar la definición de riqueza de alguien más.
 
-Las personas en el Arcén persiguen la riqueza que ven en redes sociales — carros, ropa, viajes para mostrar. Esa riqueza es una trampa.
+Las personas en el Sin Rumbo persiguen la riqueza que ven en redes sociales — carros, ropa, viajes para mostrar. Esa riqueza es una trampa.
 
 **La pregunta correcta:** Si el dinero no fuera un problema, ¿cómo sería un martes ordinario de tu vida?
 

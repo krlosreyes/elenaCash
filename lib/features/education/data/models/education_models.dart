@@ -55,7 +55,7 @@ class EducationProgressModel extends EducationProgressEntity {
       currentWeek: d['currentWeek'] as int? ?? 1,
       completedLessons: List<String>.from(d['completedLessons'] as List<dynamic>? ?? []),
       totalXP: d['totalXP'] as int? ?? 0,
-      currentMindset: d['currentMindset'] as String? ?? 'arcen',
+      currentMindset: d['currentMindset'] as String? ?? 'sin_rumbo',
       dailyStreakDays: d['dailyStreakDays'] as int? ?? 0,
       lastLessonAt: d['lastLessonAt'] != null
           ? (d['lastLessonAt'] as Timestamp).toDate()

@@ -81,7 +81,7 @@ class EducationProgressEntity extends Equatable {
   final int currentWeek;
   final List<String> completedLessons;
   final int totalXP;
-  final String currentMindset;    // arcen | via_lenta | activo
+  final String currentMindset;    // sin_rumbo | via_lenta | activo
   final int dailyStreakDays;
   final DateTime? lastLessonAt;
 

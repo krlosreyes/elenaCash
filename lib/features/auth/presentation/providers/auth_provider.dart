@@ -150,4 +150,32 @@ class AuthNotifier extends _$AuthNotifier {
       (_) => state = const AuthState(status: AuthStatus.unauthenticated),
     );
   }
+
+  Future<void> updateProfile({
+    String? displayName,
+    String? currency,
+    String? richLifeDescription,
+    String? country,
+    String? payFrequency,
+    double? monthlyNetIncome,
+  }) async {
+    final result = await ref.read(authRepositoryProvider).updateUserProfile(
+      displayName: displayName,
+      currency: currency,
+      richLifeDescription: richLifeDescription,
+      country: country,
+      payFrequency: payFrequency,
+      monthlyNetIncome: monthlyNetIncome,
+    );
+    result.fold(
+      (failure) => state = state.copyWith(
+        status: AuthStatus.error,
+        errorMessage: failure.message,
+      ),
+      (user) => state = AuthState(
+        status: AuthStatus.authenticated,
+        user: user,
+      ),
+    );
+  }
 }

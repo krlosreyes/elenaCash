@@ -39,7 +39,7 @@ abstract class AppColors {
   static const bucketFreeSurface = Color(0xFF2A1010);
 
   // ── Fast Lane Levels ─────────────────────────────────
-  static const fastLaneSidewalk = Color(0xFF6B7280);   // Gris: arcén
+  static const fastLaneSidewalk = Color(0xFF6B7280);   // Gris: sin rumbo
   static const fastLaneSlow = Color(0xFF4A9EFF);        // Azul: vía lenta
   static const fastLaneFast = Color(0xFFFFB800);        // Dorado: vía rápida
 

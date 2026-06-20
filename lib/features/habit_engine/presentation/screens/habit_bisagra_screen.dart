@@ -6,14 +6,22 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../providers/habit_engine_provider.dart';
 
 /// Pantalla del Hábito Bisagra — inspirada en Duhigg.
 /// Explica el concepto y ayuda al usuario a identificar su keystone habit financiero.
-class HabitBisagraScreen extends ConsumerWidget {
+class HabitBisagraScreen extends ConsumerStatefulWidget {
   const HabitBisagraScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HabitBisagraScreen> createState() => _HabitBisagraScreenState();
+}
+
+class _HabitBisagraScreenState extends ConsumerState<HabitBisagraScreen> {
+  String? _selectedProblem;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -150,7 +158,11 @@ class HabitBisagraScreen extends ConsumerWidget {
             ..._problems.map(
               (p) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: _ProblemChip(problem: p),
+                child: _ProblemChip(
+                  problem: p,
+                  selected: _selectedProblem == p.text,
+                  onTap: () => setState(() => _selectedProblem = p.text),
+                ),
               ),
             ).toList().animate(interval: 50.ms).fadeIn().slideX(begin: 0.05),
 
@@ -160,10 +172,14 @@ class HabitBisagraScreen extends ConsumerWidget {
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: () {
-                  // TODO: guardar problema seleccionado y navegar
-                  context.pop();
-                },
+                onPressed: _selectedProblem == null
+                    ? null
+                    : () async {
+                        await ref
+                            .read(habitEngineProvider.notifier)
+                            .saveFinancialProblem(_selectedProblem!);
+                        if (context.mounted) context.pop();
+                      },
                 child: const Text('Activar mi Hábito Bisagra'),
               ),
             ).animate().fadeIn(delay: 600.ms),
@@ -191,40 +207,40 @@ class _Problem {
   const _Problem({required this.emoji, required this.text});
 }
 
-class _ProblemChip extends StatefulWidget {
+class _ProblemChip extends StatelessWidget {
   final _Problem problem;
-  const _ProblemChip({required this.problem});
+  final bool selected;
+  final VoidCallback onTap;
 
-  @override
-  State<_ProblemChip> createState() => _ProblemChipState();
-}
-
-class _ProblemChipState extends State<_ProblemChip> {
-  bool _selected = false;
+  const _ProblemChip({
+    required this.problem,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return GestureDetector(
-      onTap: () => setState(() => _selected = !_selected),
+      onTap: onTap,
       child: AnimatedContainer(
         duration: AppConstants.animFast,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: _selected ? AppColors.primarySurface : theme.cardColor,
+          color: selected ? AppColors.primarySurface : theme.cardColor,
           borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
           border: Border.all(
-            color: _selected ? AppColors.primary : theme.dividerColor,
-            width: _selected ? 1.5 : 1,
+            color: selected ? AppColors.primary : theme.dividerColor,
+            width: selected ? 1.5 : 1,
           ),
         ),
         child: Row(
           children: [
-            Text(widget.problem.emoji, style: const TextStyle(fontSize: 20)),
+            Text(problem.emoji, style: const TextStyle(fontSize: 20)),
             const Gap(12),
-            Text(widget.problem.text, style: theme.textTheme.bodyMedium),
+            Text(problem.text, style: theme.textTheme.bodyMedium),
             const Spacer(),
-            if (_selected)
+            if (selected)
               const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20),
           ],
         ),

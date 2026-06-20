@@ -123,6 +123,13 @@ class HabitEngineNotifier extends _$HabitEngineNotifier {
     }, SetOptions(merge: true));
   }
 
+  /// Guarda el problema financiero principal del usuario
+  Future<void> saveFinancialProblem(String problem) async {
+    await _docRef.set({
+      'financialProblem': problem,
+    }, SetOptions(merge: true));
+  }
+
   /// Registra la decisión sobre un antojo pausado
   Future<void> decideCraving({
     required String cravingId,

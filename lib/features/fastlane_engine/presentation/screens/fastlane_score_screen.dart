@@ -36,7 +36,7 @@ class _FastlaneScoreScreenState extends ConsumerState<FastlaneScoreScreen> {
     final fastlaneAsync = ref.watch(fastLaneEngineProvider);
     final entity = fastlaneAsync.asData?.value;
     final score = (entity?.fastLaneScore ?? 0).toDouble();
-    final roadmap = entity?.roadmap ?? FastLaneRoadmap.arcen;
+    final roadmap = entity?.roadmap ?? FastLaneRoadmap.sinRumbo;
     final passiveTotal = entity?.passiveIncomeMonthly ?? 0;
 
     return Scaffold(
@@ -111,14 +111,14 @@ class _ScoreHero extends StatelessWidget {
   const _ScoreHero({required this.score, required this.roadmap, required this.currency, this.entity});
 
   Color get _color => switch (roadmap) {
-    FastLaneRoadmap.arcen => AppColors.fastLaneSidewalk,
+    FastLaneRoadmap.sinRumbo => AppColors.fastLaneSidewalk,
     FastLaneRoadmap.viaLenta => AppColors.fastLaneSlow,
     FastLaneRoadmap.viaRapida => AppColors.fastLaneFast,
     FastLaneRoadmap.elite => AppColors.gold,
   };
 
   String get _emoji => switch (roadmap) {
-    FastLaneRoadmap.arcen => '🚶',
+    FastLaneRoadmap.sinRumbo => '🚶',
     FastLaneRoadmap.viaLenta => '🚗',
     FastLaneRoadmap.viaRapida => '🚀',
     FastLaneRoadmap.elite => '💎',
@@ -215,7 +215,7 @@ class _RoadmapLevels extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final levels = [
-      (FastLaneRoadmap.arcen, '🚶', 'Arcén', '0–24', AppColors.fastLaneSidewalk),
+      (FastLaneRoadmap.sinRumbo, '🚶', 'Sin Rumbo', '0–24', AppColors.fastLaneSidewalk),
       (FastLaneRoadmap.viaLenta, '🚗', 'Vía Lenta', '25–59', AppColors.fastLaneSlow),
       (FastLaneRoadmap.viaRapida, '🚀', 'Vía Rápida', '60–84', AppColors.fastLaneFast),
       (FastLaneRoadmap.elite, '💎', 'Élite', '85–100', AppColors.gold),
