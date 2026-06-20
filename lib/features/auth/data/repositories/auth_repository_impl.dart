@@ -39,6 +39,9 @@ class AuthRepositoryImpl implements AuthRepository {
   Stream<UserEntity?> get authStateChanges {
     return _auth.authStateChanges().asyncMap((firebaseUser) async {
       if (firebaseUser == null) return null;
+      final provider = firebaseUser.providerData
+          .map((p) => p.providerId)
+          .firstWhere((id) => id != 'firebase', orElse: () => 'password');
       try {
         final doc = await _firestore.collection('users').doc(firebaseUser.uid).get();
         if (!doc.exists) {
@@ -51,9 +54,10 @@ class AuthRepositoryImpl implements AuthRepository {
             displayName: firebaseUser.displayName ?? '',
             photoUrl: firebaseUser.photoURL,
             createdAt: firebaseUser.metadata.creationTime ?? DateTime.now(),
+            signInProvider: provider,
           );
         }
-        return UserModel.fromFirestore(doc);
+        return UserModel.fromFirestore(doc, signInProvider: provider);
       } catch (_) {
         return null;
       }

@@ -145,6 +145,12 @@ class AuthNotifier extends _$AuthNotifier {
   Future<Failure?> deleteAccount() async {
     state = state.copyWith(status: AuthStatus.loading);
     final result = await ref.read(authRepositoryProvider).deleteAccount();
+
+    // Cuando Firebase elimina el usuario, authStateChanges() dispara null
+    // inmediatamente → GoRouter redirige → este provider se dispone.
+    // Si eso ocurrió antes de que el fold ejecute, no tocamos el state.
+    if (!ref.mounted) return result.fold((f) => f, (_) => null);
+
     return result.fold(
       (failure) {
         state = AuthState(
@@ -154,7 +160,7 @@ class AuthNotifier extends _$AuthNotifier {
         return failure;
       },
       (_) {
-        state = const AuthState(status: AuthStatus.unauthenticated);
+        // El stream ya puso el estado en unauthenticated; solo retornamos null.
         return null;
       },
     );

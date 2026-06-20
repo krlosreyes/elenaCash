@@ -18,9 +18,13 @@ class UserModel extends UserEntity {
     super.richLifeDescription,
     super.onboardingCompleted,
     required super.createdAt,
+    super.signInProvider,
   });
 
-  factory UserModel.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory UserModel.fromFirestore(
+    DocumentSnapshot<Map<String, dynamic>> doc, {
+    String signInProvider = 'password',
+  }) {
     final data = doc.data()!;
     return UserModel(
       uid: doc.id,
@@ -40,6 +44,7 @@ class UserModel extends UserEntity {
       createdAt: data['createdAt'] != null
           ? (data['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
+      signInProvider: data['signInProvider'] as String? ?? signInProvider,
     );
   }
 
@@ -85,6 +90,7 @@ class UserModel extends UserEntity {
       richLifeDescription: entity.richLifeDescription,
       onboardingCompleted: entity.onboardingCompleted,
       createdAt: entity.createdAt,
+      signInProvider: entity.signInProvider,
     );
   }
 }

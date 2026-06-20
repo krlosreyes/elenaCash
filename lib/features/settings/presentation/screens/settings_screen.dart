@@ -375,6 +375,8 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showDeleteDialog(BuildContext context, WidgetRef ref) {
     final user = ref.read(currentUserProvider).asData?.value;
+    final isGoogle = user?.isGoogleUser ?? false;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -438,7 +440,14 @@ class SettingsScreen extends ConsumerWidget {
           TextButton(
             onPressed: () async {
               ctx.pop();
-              await _executeDeleteAccount(context, ref, user?.email);
+              // Siempre pedimos credenciales ANTES de borrar, sin esperar
+              // a que Firebase lance requires-recent-login.
+              await _showReauthAndDelete(
+                context,
+                ref,
+                isGoogleUser: isGoogle,
+                email: user?.email,
+              );
             },
             style: TextButton.styleFrom(foregroundColor: AppColors.error),
             child: const Text('Sí, eliminar mi cuenta'),
@@ -448,41 +457,21 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _executeDeleteAccount(
-      BuildContext context, WidgetRef ref, String? email) async {
-    final failure = await ref.read(authProvider.notifier).deleteAccount();
-    if (failure == null) return; // Éxito — el router navega a login automáticamente
-
-    if (!context.mounted) return;
-
-    if (failure is ReauthRequiredFailure) {
-      // Firebase requiere re-autenticación — mostrar el flujo apropiado
-      await _showReauthDialog(context, ref, failure.isGoogleUser, email);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${failure.message}'),
-          backgroundColor: AppColors.error,
-        ),
-      );
-    }
-  }
-
-  Future<void> _showReauthDialog(
+  Future<void> _showReauthAndDelete(
     BuildContext context,
-    WidgetRef ref,
-    bool isGoogleUser,
+    WidgetRef ref, {
+    required bool isGoogleUser,
     String? email,
-  ) async {
+  }) async {
+    // ── Paso 1: Re-autenticación ────────────────────────────────────
     if (isGoogleUser) {
-      // Re-auth con Google
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Confirma tu identidad'),
           content: const Text(
-            'Para eliminar tu cuenta, necesitamos confirmar '
-            'que eres tú. Iniciarás sesión con Google una vez más.',
+            'Para eliminar tu cuenta necesitamos verificar que eres tú. '
+            'Se abrirá Google para confirmar.',
           ),
           actions: [
             TextButton(
@@ -509,7 +498,6 @@ class SettingsScreen extends ConsumerWidget {
         return;
       }
     } else {
-      // Re-auth con email/contraseña
       final ctrl = TextEditingController();
       String? enteredPassword;
       final confirmed = await showDialog<bool>(
@@ -564,14 +552,17 @@ class SettingsScreen extends ConsumerWidget {
       if (reauthFailure != null) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Contraseña incorrecta: ${reauthFailure.message}')),
+            SnackBar(
+              content: Text('Contraseña incorrecta: ${reauthFailure.message}'),
+              backgroundColor: AppColors.error,
+            ),
           );
         }
         return;
       }
     }
 
-    // Re-auth exitosa — reintentar eliminación
+    // ── Paso 2: Eliminar cuenta (ya re-autenticado) ─────────────────
     if (!context.mounted) return;
     final failure = await ref.read(authProvider.notifier).deleteAccount();
     if (failure != null && context.mounted) {

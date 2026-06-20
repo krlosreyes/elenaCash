@@ -16,6 +16,8 @@ class UserEntity extends Equatable {
   final String richLifeDescription;
   final bool onboardingCompleted;
   final DateTime createdAt;
+  /// 'password' | 'google.com' — proveedor con el que se autenticó
+  final String signInProvider;
 
   const UserEntity({
     required this.uid,
@@ -31,7 +33,10 @@ class UserEntity extends Equatable {
     this.richLifeDescription = '',
     this.onboardingCompleted = false,
     required this.createdAt,
+    this.signInProvider = 'password',
   });
+
+  bool get isGoogleUser => signInProvider == 'google.com';
 
   UserEntity copyWith({
     String? uid,
@@ -47,6 +52,7 @@ class UserEntity extends Equatable {
     String? richLifeDescription,
     bool? onboardingCompleted,
     DateTime? createdAt,
+    String? signInProvider,
   }) {
     return UserEntity(
       uid: uid ?? this.uid,
@@ -62,6 +68,7 @@ class UserEntity extends Equatable {
       richLifeDescription: richLifeDescription ?? this.richLifeDescription,
       onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
       createdAt: createdAt ?? this.createdAt,
+      signInProvider: signInProvider ?? this.signInProvider,
     );
   }
 
