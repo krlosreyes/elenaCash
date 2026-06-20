@@ -19,6 +19,7 @@ class UserModel extends UserEntity {
     super.onboardingCompleted,
     required super.createdAt,
     super.signInProvider,
+    super.richLifeCategories,
   });
 
   factory UserModel.fromFirestore(
@@ -45,6 +46,8 @@ class UserModel extends UserEntity {
           ? (data['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
       signInProvider: data['signInProvider'] as String? ?? signInProvider,
+      richLifeCategories: List<String>.from(
+          data['richLifeCategories'] as List<dynamic>? ?? []),
     );
   }
 
@@ -91,6 +94,7 @@ class UserModel extends UserEntity {
       onboardingCompleted: entity.onboardingCompleted,
       createdAt: entity.createdAt,
       signInProvider: entity.signInProvider,
+      richLifeCategories: entity.richLifeCategories,
     );
   }
 }

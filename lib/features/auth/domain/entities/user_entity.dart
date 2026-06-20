@@ -18,6 +18,9 @@ class UserEntity extends Equatable {
   final DateTime createdAt;
   /// 'password' | 'google.com' — proveedor con el que se autenticó
   final String signInProvider;
+  /// IDs de las categorías de Rich Life seleccionadas en el onboarding.
+  /// Ej: ['viajes', 'tiempo_libre', 'negocio']
+  final List<String> richLifeCategories;
 
   const UserEntity({
     required this.uid,
@@ -34,6 +37,7 @@ class UserEntity extends Equatable {
     this.onboardingCompleted = false,
     required this.createdAt,
     this.signInProvider = 'password',
+    this.richLifeCategories = const [],
   });
 
   bool get isGoogleUser => signInProvider == 'google.com';
@@ -53,6 +57,7 @@ class UserEntity extends Equatable {
     bool? onboardingCompleted,
     DateTime? createdAt,
     String? signInProvider,
+    List<String>? richLifeCategories,
   }) {
     return UserEntity(
       uid: uid ?? this.uid,
@@ -69,6 +74,7 @@ class UserEntity extends Equatable {
       onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
       createdAt: createdAt ?? this.createdAt,
       signInProvider: signInProvider ?? this.signInProvider,
+      richLifeCategories: richLifeCategories ?? this.richLifeCategories,
     );
   }
 

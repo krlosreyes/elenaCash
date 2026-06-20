@@ -23,8 +23,8 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   final PageController _controller = PageController();
   int _page = 0;
 
-  // Step 1 – Rich Life
-  final _richLifeCtrl = TextEditingController();
+  // Step 1 – Rich Life (selección múltiple estructurada)
+  final List<String> _richLifeCategories = [];
   // Step 2 – Ingresos
   final _incomeCtrl = TextEditingController();
   String _currency = 'COP';
@@ -39,7 +39,6 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   @override
   void dispose() {
     _controller.dispose();
-    _richLifeCtrl.dispose();
     _incomeCtrl.dispose();
     super.dispose();
   }
@@ -91,10 +90,15 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. Marcar onboarding como completado en el perfil del usuario
+      // 2. Perfil del usuario: onboarding + Rich Life categorías
       final userRef = firestore.collection(AppConstants.colUsers).doc(uid);
       batch.set(userRef, {
         'onboardingCompleted': true,
+        'richLifeCategories': _richLifeCategories,
+        // descripción legible generada desde las categorías seleccionadas
+        'richLifeDescription': _richLifeCategories
+            .map((id) => _RichLifeOption.labelFor(id))
+            .join(', '),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -130,7 +134,15 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   _WelcomePage(onNext: _next),
-                  _RichLifePage(controller: _richLifeCtrl, onNext: _next),
+                  _RichLifePage(
+                    selected: _richLifeCategories,
+                    onChanged: (cats) => setState(() {
+                      _richLifeCategories
+                        ..clear()
+                        ..addAll(cats);
+                    }),
+                    onNext: _next,
+                  ),
                   _IncomePage(
                     controller: _incomeCtrl,
                     currency: _currency,
@@ -202,48 +214,294 @@ class _WelcomePage extends StatelessWidget {
   }
 }
 
-class _RichLifePage extends StatelessWidget {
-  final TextEditingController controller;
+// ── Rich Life — selección múltiple estructurada ───────────────────
+
+class _RichLifeOption {
+  final String id;
+  final String emoji;
+  final String title;
+  final String description;
+  final _RichLifeProfile profile; // para diagnóstico
+
+  const _RichLifeOption({
+    required this.id,
+    required this.emoji,
+    required this.title,
+    required this.description,
+    required this.profile,
+  });
+
+  static String labelFor(String id) =>
+      _all.firstWhere((o) => o.id == id, orElse: () => _RichLifeOption(
+        id: id, emoji: '', title: id, description: '', profile: _RichLifeProfile.builder,
+      )).title;
+
+  // 12 categorías basadas en Sethi + DeMarco + contexto LATAM
+  static const _all = [
+    _RichLifeOption(
+      id: 'tiempo_libre',
+      emoji: '⏰',
+      title: 'Tiempo libre',
+      description: 'Trabajar menos horas, más días libres, horario flexible',
+      profile: _RichLifeProfile.freedom,
+    ),
+    _RichLifeOption(
+      id: 'viajes',
+      emoji: '✈️',
+      title: 'Viajes y aventuras',
+      description: 'Explorar el mundo sin mirar el precio de los tiquetes',
+      profile: _RichLifeProfile.freedom,
+    ),
+    _RichLifeOption(
+      id: 'familia',
+      emoji: '👨‍👩‍👧',
+      title: 'Familia y educación',
+      description: 'Pagar el mejor colegio, vivir cerca, darles lo mejor',
+      profile: _RichLifeProfile.provider,
+    ),
+    _RichLifeOption(
+      id: 'hogar',
+      emoji: '🏠',
+      title: 'Casa propia',
+      description: 'Tu espacio ideal, sin pagar arriendo toda la vida',
+      profile: _RichLifeProfile.provider,
+    ),
+    _RichLifeOption(
+      id: 'negocio',
+      emoji: '🚀',
+      title: 'Negocio propio',
+      description: 'Construir algo tuyo, ser tu propio jefe, escalar',
+      profile: _RichLifeProfile.builder,
+    ),
+    _RichLifeOption(
+      id: 'independencia',
+      emoji: '🔑',
+      title: 'Independencia financiera',
+      description: 'Que trabajar sea una opción, no una obligación',
+      profile: _RichLifeProfile.investor,
+    ),
+    _RichLifeOption(
+      id: 'salud',
+      emoji: '💪',
+      title: 'Salud y bienestar',
+      description: 'Gym, nutrición, salud mental sin restricciones de precio',
+      profile: _RichLifeProfile.lifestyle,
+    ),
+    _RichLifeOption(
+      id: 'educacion',
+      emoji: '📚',
+      title: 'Educación y crecimiento',
+      description: 'Cursos, libros, maestrías — aprender sin límites',
+      profile: _RichLifeProfile.builder,
+    ),
+    _RichLifeOption(
+      id: 'experiencias',
+      emoji: '🎭',
+      title: 'Experiencias y cultura',
+      description: 'Conciertos, restaurantes, arte, momentos que no se olvidan',
+      profile: _RichLifeProfile.lifestyle,
+    ),
+    _RichLifeOption(
+      id: 'remoto',
+      emoji: '💻',
+      title: 'Trabajo desde donde quiera',
+      description: 'Nomadismo digital, no estar atado a una oficina',
+      profile: _RichLifeProfile.freedom,
+    ),
+    _RichLifeOption(
+      id: 'lujo_cotidiano',
+      emoji: '✨',
+      title: 'Calidad sin culpa',
+      description: 'Buena ropa, buen carro, vuelos en business — sin remordimiento',
+      profile: _RichLifeProfile.lifestyle,
+    ),
+    _RichLifeOption(
+      id: 'impacto',
+      emoji: '🌱',
+      title: 'Impacto y legado',
+      description: 'Dejar algo al mundo, apoyar causas, generar cambio real',
+      profile: _RichLifeProfile.investor,
+    ),
+  ];
+}
+
+/// Perfil de diagnóstico del usuario según sus selecciones.
+/// Usado para personalizar recomendaciones futuras.
+enum _RichLifeProfile { freedom, provider, builder, investor, lifestyle }
+
+class _RichLifePage extends StatefulWidget {
+  final List<String> selected;
+  final ValueChanged<List<String>> onChanged;
   final VoidCallback onNext;
-  const _RichLifePage({required this.controller, required this.onNext});
+
+  const _RichLifePage({
+    required this.selected,
+    required this.onChanged,
+    required this.onNext,
+  });
+
+  @override
+  State<_RichLifePage> createState() => _RichLifePageState();
+}
+
+class _RichLifePageState extends State<_RichLifePage> {
+  late final List<String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = List.from(widget.selected);
+  }
+
+  void _toggle(String id) {
+    setState(() {
+      if (_selected.contains(id)) {
+        _selected.remove(id);
+      } else {
+        _selected.add(id);
+      }
+    });
+    widget.onChanged(List.from(_selected));
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(AppConstants.defaultPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Gap(32),
-          Text('💭', style: const TextStyle(fontSize: 48)).animate().fadeIn(),
-          const Gap(16),
-          Text('¿Qué es una vida rica para ti?', style: theme.textTheme.headlineSmall)
-              .animate().fadeIn(delay: 100.ms),
-          const Gap(8),
-          Text(
-            'No te estamos preguntando cuánto dinero quieres. '
-            'Te preguntamos cómo sería un martes ordinario de tu vida si el dinero no fuera un problema.',
-            style: theme.textTheme.bodyMedium,
-          ).animate().fadeIn(delay: 200.ms),
-          const Gap(24),
-          TextField(
-            controller: controller,
-            maxLines: 4,
-            decoration: const InputDecoration(
-              hintText: 'Ej: Trabajar desde casa, viajar 3 meses al año, pagar el colegio de mis hijos sin preocupaciones...',
-            ),
-          ).animate().fadeIn(delay: 300.ms),
-          const Spacer(),
-          SizedBox(
+    final canContinue = _selected.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppConstants.defaultPadding, 24, AppConstants.defaultPadding, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('🌟', style: const TextStyle(fontSize: 40))
+                  .animate().fadeIn(),
+              const Gap(12),
+              Text('¿Qué es una vida rica para ti?',
+                      style: theme.textTheme.headlineSmall)
+                  .animate().fadeIn(delay: 100.ms),
+              const Gap(6),
+              Text(
+                'Selecciona todo lo que resuene contigo. '
+                'Esto nos ayuda a personalizar tu plan.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark),
+              ).animate().fadeIn(delay: 150.ms),
+              const Gap(4),
+              if (_selected.isNotEmpty)
+                Text(
+                  '${_selected.length} seleccionada${_selected.length > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ).animate().fadeIn(),
+            ],
+          ),
+        ),
+        const Gap(12),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppConstants.defaultPadding),
+            itemCount: _RichLifeOption._all.length,
+            separatorBuilder: (_, __) => const Gap(8),
+            itemBuilder: (ctx, i) {
+              final opt = _RichLifeOption._all[i];
+              final isSelected = _selected.contains(opt.id);
+              return _RichLifeCard(
+                option: opt,
+                selected: isSelected,
+                onTap: () => _toggle(opt.id),
+              ).animate(delay: (i * 40).ms).fadeIn().slideX(begin: 0.04);
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(AppConstants.defaultPadding),
+          child: SizedBox(
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: onNext,
-              child: const Text('Siguiente'),
+              onPressed: canContinue ? widget.onNext : null,
+              child: Text(canContinue
+                  ? 'Siguiente →'
+                  : 'Elige al menos una opción'),
             ),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+class _RichLifeCard extends StatelessWidget {
+  final _RichLifeOption option;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _RichLifeCard({
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: AppConstants.animFast,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primarySurface : theme.cardColor,
+          borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
+          border: Border.all(
+            color: selected ? AppColors.primary : theme.dividerColor,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Text(option.emoji, style: const TextStyle(fontSize: 22)),
+            const Gap(12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    option.title,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: selected ? AppColors.primary : null,
+                    ),
+                  ),
+                  Text(
+                    option.description,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondaryDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Gap(8),
+            AnimatedSwitcher(
+              duration: AppConstants.animFast,
+              child: selected
+                  ? const Icon(Icons.check_circle_rounded,
+                      color: AppColors.primary, size: 20, key: ValueKey(true))
+                  : Icon(Icons.radio_button_unchecked_rounded,
+                      color: theme.dividerColor, size: 20, key: ValueKey(false)),
+            ),
+          ],
+        ),
       ),
     );
   }
