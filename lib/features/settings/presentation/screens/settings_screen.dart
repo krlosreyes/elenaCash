@@ -511,6 +511,7 @@ class SettingsScreen extends ConsumerWidget {
     } else {
       // Re-auth con email/contraseña
       final ctrl = TextEditingController();
+      String? enteredPassword;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -544,11 +545,9 @@ class SettingsScreen extends ConsumerWidget {
             ),
             TextButton(
               onPressed: () {
-                final pwd = ctrl.text;
+                enteredPassword = ctrl.text;
                 ctrl.dispose();
                 ctx.pop(true);
-                // Guardamos la contraseña para usarla después
-                _pendingPassword = pwd;
               },
               style: TextButton.styleFrom(foregroundColor: AppColors.error),
               child: const Text('Confirmar y eliminar'),
@@ -560,8 +559,7 @@ class SettingsScreen extends ConsumerWidget {
 
       final reauthFailure = await ref
           .read(authProvider.notifier)
-          .reauthenticateWithPassword(_pendingPassword ?? '');
-      _pendingPassword = null;
+          .reauthenticateWithPassword(enteredPassword ?? '');
 
       if (reauthFailure != null) {
         if (context.mounted) {
@@ -586,8 +584,6 @@ class SettingsScreen extends ConsumerWidget {
     }
   }
 
-  // Campo temporal para pasar la contraseña entre callbacks de dialog
-  String? _pendingPassword;
 
   String _currencyLabel(String code) => switch (code) {
         'COP' => '🇨🇴 Peso Colombiano (COP)',
