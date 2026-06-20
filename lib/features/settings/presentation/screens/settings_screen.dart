@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/errors/failures.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/theme_mode_provider.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -373,29 +374,220 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   void _showDeleteDialog(BuildContext context, WidgetRef ref) {
+    final user = ref.read(currentUserProvider).asData?.value;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('¿Eliminar cuenta?'),
-        content: const Text(
-          'Esta acción eliminará permanentemente todos tus datos. '
-          'No se puede deshacer.',
+        title: const Text('Eliminar cuenta'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Esta acción es permanente e irreversible. '
+              'Se eliminará toda tu información:',
+              style: TextStyle(fontSize: 14),
+            ),
+            const Gap(12),
+            ...[
+              '📊 Plan Consciente y presupuestos',
+              '🌳 Árbol del Dinero e ingresos pasivos',
+              '💳 Deudas y metas de ahorro',
+              '📚 Progreso educativo y rachas',
+              '👤 Tu perfil y cuenta de acceso',
+            ].map((item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.substring(0, 2)),
+                      const Gap(6),
+                      Expanded(
+                        child: Text(
+                          item.substring(3),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            const Gap(12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.error.withOpacity(0.3)),
+              ),
+              child: const Text(
+                'No podrás recuperar estos datos después.',
+                style: TextStyle(
+                  color: AppColors.error,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
-              onPressed: () => ctx.pop(), child: const Text('Cancelar')),
+            onPressed: () => ctx.pop(),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
             onPressed: () async {
               ctx.pop();
-              await ref.read(authProvider.notifier).deleteAccount();
+              await _executeDeleteAccount(context, ref, user?.email);
             },
             style: TextButton.styleFrom(foregroundColor: AppColors.error),
-            child: const Text('Eliminar'),
+            child: const Text('Sí, eliminar mi cuenta'),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _executeDeleteAccount(
+      BuildContext context, WidgetRef ref, String? email) async {
+    final failure = await ref.read(authProvider.notifier).deleteAccount();
+    if (failure == null) return; // Éxito — el router navega a login automáticamente
+
+    if (!context.mounted) return;
+
+    if (failure is ReauthRequiredFailure) {
+      // Firebase requiere re-autenticación — mostrar el flujo apropiado
+      await _showReauthDialog(context, ref, failure.isGoogleUser, email);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${failure.message}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showReauthDialog(
+    BuildContext context,
+    WidgetRef ref,
+    bool isGoogleUser,
+    String? email,
+  ) async {
+    if (isGoogleUser) {
+      // Re-auth con Google
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Confirma tu identidad'),
+          content: const Text(
+            'Para eliminar tu cuenta, necesitamos confirmar '
+            'que eres tú. Iniciarás sesión con Google una vez más.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => ctx.pop(false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => ctx.pop(true),
+              child: const Text('Continuar con Google'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+
+      final reauthFailure =
+          await ref.read(authProvider.notifier).reauthenticateWithGoogle();
+      if (reauthFailure != null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: ${reauthFailure.message}')),
+          );
+        }
+        return;
+      }
+    } else {
+      // Re-auth con email/contraseña
+      final ctrl = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Confirma tu contraseña'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Ingresa la contraseña de ${email ?? 'tu cuenta'} para confirmar.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const Gap(12),
+              TextField(
+                controller: ctrl,
+                obscureText: true,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Contraseña',
+                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                ctrl.dispose();
+                ctx.pop(false);
+              },
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () {
+                final pwd = ctrl.text;
+                ctrl.dispose();
+                ctx.pop(true);
+                // Guardamos la contraseña para usarla después
+                _pendingPassword = pwd;
+              },
+              style: TextButton.styleFrom(foregroundColor: AppColors.error),
+              child: const Text('Confirmar y eliminar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+
+      final reauthFailure = await ref
+          .read(authProvider.notifier)
+          .reauthenticateWithPassword(_pendingPassword ?? '');
+      _pendingPassword = null;
+
+      if (reauthFailure != null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Contraseña incorrecta: ${reauthFailure.message}')),
+          );
+        }
+        return;
+      }
+    }
+
+    // Re-auth exitosa — reintentar eliminación
+    if (!context.mounted) return;
+    final failure = await ref.read(authProvider.notifier).deleteAccount();
+    if (failure != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al eliminar: ${failure.message}'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  // Campo temporal para pasar la contraseña entre callbacks de dialog
+  String? _pendingPassword;
 
   String _currencyLabel(String code) => switch (code) {
         'COP' => '🇨🇴 Peso Colombiano (COP)',

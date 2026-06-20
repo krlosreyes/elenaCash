@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../../../core/errors/failures.dart';
 import '../../../../shared/providers/firebase_providers.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/user_entity.dart';
@@ -139,16 +140,37 @@ class AuthNotifier extends _$AuthNotifier {
     state = const AuthState(status: AuthStatus.unauthenticated);
   }
 
-  Future<void> deleteAccount() async {
+  /// Elimina la cuenta. Devuelve null si ok, Failure si hay error.
+  /// Puede devolver ReauthRequiredFailure si la sesión es antigua.
+  Future<Failure?> deleteAccount() async {
     state = state.copyWith(status: AuthStatus.loading);
     final result = await ref.read(authRepositoryProvider).deleteAccount();
-    result.fold(
-      (failure) => state = AuthState(
-        status: AuthStatus.error,
-        errorMessage: failure.message,
-      ),
-      (_) => state = const AuthState(status: AuthStatus.unauthenticated),
+    return result.fold(
+      (failure) {
+        state = AuthState(
+          status: AuthStatus.error,
+          errorMessage: failure.message,
+        );
+        return failure;
+      },
+      (_) {
+        state = const AuthState(status: AuthStatus.unauthenticated);
+        return null;
+      },
     );
+  }
+
+  Future<Failure?> reauthenticateWithPassword(String password) async {
+    final result = await ref
+        .read(authRepositoryProvider)
+        .reauthenticateWithPassword(password);
+    return result.fold((f) => f, (_) => null);
+  }
+
+  Future<Failure?> reauthenticateWithGoogle() async {
+    final result =
+        await ref.read(authRepositoryProvider).reauthenticateWithGoogle();
+    return result.fold((f) => f, (_) => null);
   }
 
   Future<void> updateProfile({

@@ -243,11 +243,104 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<Either<Failure, void>> deleteAccount() async {
     try {
-      final uid = _auth.currentUser?.uid;
-      if (uid == null) return const Left(AuthFailure(message: 'No hay sesión activa.'));
-      await _firestore.collection('users').doc(uid).delete();
-      await _auth.currentUser?.delete();
+      final user = _auth.currentUser;
+      if (user == null) return const Left(AuthFailure(message: 'No hay sesión activa.'));
+      final uid = user.uid;
+
+      // 1. Borrar todas las subcolecciones de Firestore
+      await _deleteUserFirestoreData(uid);
+
+      // 2. Eliminar la cuenta de Firebase Auth
+      await user.delete();
+
       return const Right(null);
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'requires-recent-login') {
+        final isGoogle = _auth.currentUser?.providerData
+                .any((p) => p.providerId == 'google.com') ??
+            false;
+        return Left(ReauthRequiredFailure(isGoogleUser: isGoogle));
+      }
+      return Left(_mapFirebaseAuthException(e));
+    } catch (e) {
+      return Left(ServerFailure(message: e.toString()));
+    }
+  }
+
+  /// Borra todos los datos del usuario en Firestore antes de eliminar la cuenta.
+  Future<void> _deleteUserFirestoreData(String uid) async {
+    final userDoc = _firestore.collection('users').doc(uid);
+
+    // Subcollecciones con un único documento conocido
+    final singleDocCols = [
+      'consciousPlan',
+      'fastlaneEngine',
+      'habitEngine',
+      'educationProgress',
+    ];
+
+    for (final col in singleDocCols) {
+      try {
+        await userDoc.collection(col).doc('current').delete();
+      } catch (_) {}
+    }
+
+    // Subcollecciones con múltiples documentos
+    final multiDocCols = ['debts', 'savingsGoals', 'monthlySnapshots'];
+    for (final col in multiDocCols) {
+      try {
+        final snap = await userDoc.collection(col).get();
+        final batch = _firestore.batch();
+        for (final doc in snap.docs) {
+          batch.delete(doc.reference);
+        }
+        if (snap.docs.isNotEmpty) await batch.commit();
+      } catch (_) {}
+    }
+
+    // Finalmente el documento raíz del usuario
+    try {
+      await userDoc.delete();
+    } catch (_) {}
+  }
+
+  @override
+  Future<Either<Failure, void>> reauthenticateWithPassword(
+      String password) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null || user.email == null) {
+        return const Left(AuthFailure(message: 'No hay sesión activa.'));
+      }
+      final credential = EmailAuthProvider.credential(
+        email: user.email!,
+        password: password,
+      );
+      await user.reauthenticateWithCredential(credential);
+      return const Right(null);
+    } on FirebaseAuthException catch (e) {
+      return Left(_mapFirebaseAuthException(e));
+    } catch (e) {
+      return Left(ServerFailure(message: e.toString()));
+    }
+  }
+
+  @override
+  Future<Either<Failure, void>> reauthenticateWithGoogle() async {
+    try {
+      final googleAccount = await _googleSignIn.signIn();
+      if (googleAccount == null) {
+        return const Left(AuthFailure(message: 'Inicio de sesión con Google cancelado.'));
+      }
+      final googleAuth = await googleAccount.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      await _auth.currentUser?.reauthenticateWithCredential(credential);
+      return const Right(null);
+    } on FirebaseAuthException catch (e) {
+      return Left(_mapFirebaseAuthException(e));
     } catch (e) {
       return Left(ServerFailure(message: e.toString()));
     }

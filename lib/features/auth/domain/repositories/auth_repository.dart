@@ -45,6 +45,13 @@ abstract class AuthRepository {
     bool? onboardingCompleted,
   });
 
-  /// Elimina la cuenta del usuario.
+  /// Elimina la cuenta del usuario y todos sus datos.
+  /// Puede devolver [ReauthRequiredFailure] si la sesión es antigua.
   Future<Either<Failure, void>> deleteAccount();
+
+  /// Re-autentica con email/contraseña (requerido antes de deleteAccount).
+  Future<Either<Failure, void>> reauthenticateWithPassword(String password);
+
+  /// Re-autentica con Google (para usuarios que iniciaron sesión con Google).
+  Future<Either<Failure, void>> reauthenticateWithGoogle();
 }

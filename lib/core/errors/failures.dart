@@ -89,3 +89,14 @@ class SubscriptionRequiredFailure extends Failure {
           code: 'subscription_required',
         );
 }
+
+/// Firebase requiere re-autenticación antes de eliminar la cuenta.
+class ReauthRequiredFailure extends AuthFailure {
+  final bool isGoogleUser;
+  const ReauthRequiredFailure({this.isGoogleUser = false})
+      : super(
+          message:
+              'Por seguridad, confirma tu identidad antes de eliminar la cuenta.',
+          code: 'requires-recent-login',
+        );
+}
