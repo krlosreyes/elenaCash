@@ -233,7 +233,7 @@ class AuthRepositoryImpl implements AuthRepository {
         if (onboardingCompleted != null) 'onboardingCompleted': onboardingCompleted,
       };
 
-      await _firestore.collection('users').doc(uid).update(updates);
+      await _firestore.collection('users').doc(uid).set(updates, SetOptions(merge: true));
       return getCurrentUser();
     } catch (e) {
       return Left(ServerFailure(message: e.toString()));

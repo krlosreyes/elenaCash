@@ -95,10 +95,10 @@ class ConsciousPlanNotifier extends _$ConsciousPlanNotifier {
           .doc(userId)
           .collection(AppConstants.colConsciousPlan)
           .doc('current')
-          .update({
+          .set({
         '${bucket}Actual': amount,
         'lastUpdated': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
       // ignore: silently fail and retry
     }
@@ -111,9 +111,9 @@ class ConsciousPlanNotifier extends _$ConsciousPlanNotifier {
         .doc(userId)
         .collection(AppConstants.colConsciousPlan)
         .doc('current')
-        .update({
+        .set({
       'automationsConfigured': true,
       'lastUpdated': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
   }
 }

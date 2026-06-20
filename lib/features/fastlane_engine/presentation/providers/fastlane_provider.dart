@@ -93,10 +93,10 @@ class FastLaneNotifier extends _$FastLaneNotifier {
         .doc(userId)
         .collection(AppConstants.colFastlaneEngine)
         .doc('current')
-        .update({
+        .set({
       'moneyTreeBranches': FieldValue.arrayUnion([branch]),
       'lastUpdated': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
   }
 
   /// Elimina una rama del árbol
