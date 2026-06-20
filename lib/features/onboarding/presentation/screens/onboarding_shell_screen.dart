@@ -93,10 +93,10 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
 
       // 2. Marcar onboarding como completado en el perfil del usuario
       final userRef = firestore.collection(AppConstants.colUsers).doc(uid);
-      batch.update(userRef, {
+      batch.set(userRef, {
         'onboardingCompleted': true,
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       await batch.commit();
 
@@ -419,14 +419,31 @@ class _BucketSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 140,
-            child: Text(label, style: const TextStyle(fontSize: 13)),
+          Row(
+            children: [
+              Expanded(
+                child: Text(label, style: const TextStyle(fontSize: 13)),
+              ),
+              Text(
+                '${value.toStringAsFixed(0)}%',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
           ),
-          Expanded(
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
             child: Slider(
               value: value,
               min: 0,
@@ -435,10 +452,6 @@ class _BucketSlider extends StatelessWidget {
               activeColor: color,
               onChanged: onChanged,
             ),
-          ),
-          SizedBox(
-            width: 40,
-            child: Text('${value.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 13)),
           ),
         ],
       ),
