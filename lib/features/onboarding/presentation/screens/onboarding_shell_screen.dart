@@ -1928,11 +1928,8 @@ class _ExpenseItem {
     // Servicios personales
     _ExpenseItem(id: 'celular', emoji: '📱', label: 'Plan celular', group: 'Servicios personales'),
     _ExpenseItem(id: 'transporte', emoji: '🚌', label: 'Transporte mensual', group: 'Servicios personales'),
-    // Suscripciones
-    _ExpenseItem(id: 'streaming', emoji: '🎬', label: 'Streaming (Netflix, Disney+...)', group: 'Suscripciones'),
-    _ExpenseItem(id: 'musica', emoji: '🎵', label: 'Música (Spotify...)', group: 'Suscripciones'),
+    // Suscripciones físicas (plataformas digitales van en sección aparte)
     _ExpenseItem(id: 'gym', emoji: '💪', label: 'Gimnasio / fitness', group: 'Suscripciones'),
-    _ExpenseItem(id: 'otras_subs', emoji: '🔄', label: 'Otras suscripciones', group: 'Suscripciones'),
     // Alimentación
     _ExpenseItem(id: 'mercado', emoji: '🛒', label: 'Mercado mensual', group: 'Alimentación'),
     _ExpenseItem(id: 'restaurantes', emoji: '🍽️', label: 'Restaurantes / domicilios', group: 'Alimentación'),
@@ -1954,6 +1951,87 @@ class _ExpenseItem {
       _all.where((e) => e.group == group).toList();
 }
 
+// ── Platform / subscription data ──────────────────────────────────
+
+class _PlatformOption {
+  final String id, emoji, name, category;
+  const _PlatformOption({
+    required this.id,
+    required this.emoji,
+    required this.name,
+    required this.category,
+  });
+}
+
+const _platformOptions = [
+  // Streaming
+  _PlatformOption(id: 'netflix',        emoji: '🎬', name: 'Netflix',          category: 'Streaming'),
+  _PlatformOption(id: 'disney_plus',    emoji: '🏰', name: 'Disney+',          category: 'Streaming'),
+  _PlatformOption(id: 'prime_video',    emoji: '📦', name: 'Prime Video',       category: 'Streaming'),
+  _PlatformOption(id: 'max',            emoji: '🎭', name: 'Max',              category: 'Streaming'),
+  _PlatformOption(id: 'paramount',      emoji: '⭐', name: 'Paramount+',       category: 'Streaming'),
+  _PlatformOption(id: 'apple_tv',       emoji: '🍎', name: 'Apple TV+',        category: 'Streaming'),
+  _PlatformOption(id: 'crunchyroll',    emoji: '🍜', name: 'Crunchyroll',      category: 'Streaming'),
+  // Música
+  _PlatformOption(id: 'spotify',        emoji: '🎵', name: 'Spotify',          category: 'Música'),
+  _PlatformOption(id: 'apple_music',    emoji: '🎶', name: 'Apple Music',      category: 'Música'),
+  _PlatformOption(id: 'youtube_prem',   emoji: '▶️', name: 'YouTube Premium',  category: 'Música'),
+  _PlatformOption(id: 'deezer',         emoji: '🎧', name: 'Deezer',           category: 'Música'),
+  // Gaming
+  _PlatformOption(id: 'ps_plus',        emoji: '🎮', name: 'PlayStation Plus', category: 'Gaming'),
+  _PlatformOption(id: 'xbox_gamepass',  emoji: '🕹️', name: 'Xbox Game Pass',  category: 'Gaming'),
+  _PlatformOption(id: 'nintendo',       emoji: '🎯', name: 'Nintendo Online',  category: 'Gaming'),
+  _PlatformOption(id: 'ea_play',        emoji: '⚽', name: 'EA Play',          category: 'Gaming'),
+  // Productividad
+  _PlatformOption(id: 'microsoft365',   emoji: '💼', name: 'Microsoft 365',    category: 'Productividad'),
+  _PlatformOption(id: 'google_one',     emoji: '☁️', name: 'Google One',       category: 'Productividad'),
+  _PlatformOption(id: 'icloud',         emoji: '🍎', name: 'iCloud+',          category: 'Productividad'),
+  _PlatformOption(id: 'adobe_cc',       emoji: '🎨', name: 'Adobe CC',         category: 'Productividad'),
+  _PlatformOption(id: 'canva_pro',      emoji: '🖼️', name: 'Canva Pro',        category: 'Productividad'),
+  _PlatformOption(id: 'notion',         emoji: '📝', name: 'Notion',           category: 'Productividad'),
+  _PlatformOption(id: 'dropbox',        emoji: '📁', name: 'Dropbox',          category: 'Productividad'),
+  // Delivery
+  _PlatformOption(id: 'rappi_prime',    emoji: '🛵', name: 'Rappi Prime',      category: 'Delivery'),
+  _PlatformOption(id: 'amazon_prime',   emoji: '📦', name: 'Amazon Prime',     category: 'Delivery'),
+  // Educación
+  _PlatformOption(id: 'platzi',         emoji: '📚', name: 'Platzi',           category: 'Educación'),
+  _PlatformOption(id: 'duolingo',       emoji: '🦉', name: 'Duolingo Plus',    category: 'Educación'),
+  _PlatformOption(id: 'coursera',       emoji: '🎓', name: 'Coursera Plus',    category: 'Educación'),
+  _PlatformOption(id: 'linkedin_prem',  emoji: '💼', name: 'LinkedIn Premium', category: 'Educación'),
+  _PlatformOption(id: 'chatgpt',        emoji: '🤖', name: 'ChatGPT Plus',     category: 'Educación'),
+  // Fitness digital
+  _PlatformOption(id: 'wellhub',        emoji: '💪', name: 'Wellhub / Gympass',category: 'Fitness'),
+  _PlatformOption(id: 'apple_fitness',  emoji: '🏃', name: 'Apple Fitness+',   category: 'Fitness'),
+  // Otros
+  _PlatformOption(id: 'vpn',            emoji: '🔒', name: 'VPN',              category: 'Otros'),
+  _PlatformOption(id: 'antivirus',      emoji: '🛡️', name: 'Antivirus',        category: 'Otros'),
+];
+
+/// Categorías en el orden de presentación deseado.
+const _platformCategories = [
+  'Streaming', 'Música', 'Gaming', 'Productividad', 'Delivery',
+  'Educación', 'Fitness', 'Otros',
+];
+
+/// Una plataforma que el usuario ya seleccionó con su monto.
+class _PlatformEntry {
+  final String id, name, emoji;
+  final TextEditingController ctrl;
+  bool isAnnual;
+
+  _PlatformEntry({required this.id, required this.name, required this.emoji})
+      : ctrl = TextEditingController(),
+        isAnnual = false;
+
+  double get rawAmount =>
+      double.tryParse(ctrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+  /// Valor mensual equivalente.
+  double get monthly => isAnnual ? rawAmount / 12 : rawAmount;
+
+  void dispose() => ctrl.dispose();
+}
+
 // ── Expenses page ──────────────────────────────────────────────────
 
 class _ExpensesPage extends StatefulWidget {
@@ -1973,6 +2051,7 @@ class _ExpensesPage extends StatefulWidget {
 
 class _ExpensesPageState extends State<_ExpensesPage> {
   late final Map<String, TextEditingController> _ctrls;
+  Map<String, double> _platformMap = {};
 
   @override
   void initState() {
@@ -1995,6 +2074,7 @@ class _ExpensesPageState extends State<_ExpensesPage> {
       final v = _parse(e.value.text);
       if (v > 0) map[e.key] = v;
     }
+    map.addAll(_platformMap); // merge platform subscriptions
     return map;
   }
 
@@ -2046,8 +2126,22 @@ class _ExpensesPageState extends State<_ExpensesPage> {
           child: ListView.builder(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppConstants.defaultPadding),
-            itemCount: _ExpenseItem.groups.length,
+            itemCount: _ExpenseItem.groups.length + 1, // +1 for platforms section
             itemBuilder: (ctx, gi) {
+              // Last item → platforms section
+              if (gi == _ExpenseItem.groups.length) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 16),
+                  child: _PlatformsSection(
+                    currency: widget.currency,
+                    onChanged: (map) {
+                      _platformMap = map;
+                      _notify();
+                    },
+                  ),
+                );
+              }
+
               final group = _ExpenseItem.groups[gi];
               final items = _ExpenseItem.byGroup(group);
               return Column(
@@ -2159,6 +2253,385 @@ class _ExpensesPageState extends State<_ExpensesPage> {
           ),
         ),
         const Gap(16),
+      ],
+    );
+  }
+}
+
+// ── Platforms / subscriptions section ─────────────────────────────
+
+class _PlatformsSection extends StatefulWidget {
+  final String currency;
+  final ValueChanged<Map<String, double>> onChanged;
+
+  const _PlatformsSection({required this.currency, required this.onChanged});
+
+  @override
+  State<_PlatformsSection> createState() => _PlatformsSectionState();
+}
+
+class _PlatformsSectionState extends State<_PlatformsSection> {
+  final List<_PlatformEntry> _selected = [];
+  bool _showCustomForm = false;
+  final _customNameCtrl = TextEditingController();
+  String _customEmoji = '📱';
+
+  @override
+  void dispose() {
+    for (final e in _selected) e.dispose();
+    _customNameCtrl.dispose();
+    super.dispose();
+  }
+
+  Set<String> get _selectedIds => _selected.map((e) => e.id).toSet();
+
+  void _toggle(_PlatformOption opt) {
+    setState(() {
+      if (_selectedIds.contains(opt.id)) {
+        final entry = _selected.firstWhere((e) => e.id == opt.id);
+        entry.dispose();
+        _selected.removeWhere((e) => e.id == opt.id);
+      } else {
+        _selected.add(_PlatformEntry(id: opt.id, name: opt.name, emoji: opt.emoji));
+      }
+    });
+    _notify();
+  }
+
+  void _remove(_PlatformEntry entry) {
+    entry.dispose();
+    setState(() => _selected.remove(entry));
+    _notify();
+  }
+
+  void _addCustom() {
+    final name = _customNameCtrl.text.trim();
+    if (name.isEmpty) return;
+    final id = 'custom_${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _selected.add(_PlatformEntry(id: id, name: name, emoji: _customEmoji));
+      _customNameCtrl.clear();
+      _showCustomForm = false;
+    });
+    _notify();
+  }
+
+  void _notify() {
+    final map = <String, double>{};
+    for (final e in _selected) {
+      if (e.monthly > 0) map['plat_${e.id}'] = e.monthly;
+    }
+    widget.onChanged(map);
+  }
+
+  String get _prefix => widget.currency == 'COP' ? '\$ ' : 'USD ';
+
+  double get _sectionTotal =>
+      _selected.fold(0, (acc, e) => acc + e.monthly);
+
+  String _fmt(double v) {
+    if (widget.currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  static const _customEmojis = ['📱', '💻', '📺', '🎮', '🎵', '📦', '🔧', '🌐'];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Section header ──
+        Row(
+          children: [
+            const Text('📲', style: TextStyle(fontSize: 18)),
+            const Gap(8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Plataformas y suscripciones',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      )),
+                  Text('Selecciona las que usas · toca para agregar',
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(color: AppColors.textSecondaryDark)),
+                ],
+              ),
+            ),
+            if (_sectionTotal > 0)
+              Text(_fmt(_sectionTotal),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w800,
+                  )),
+          ],
+        ),
+        const Gap(12),
+
+        // ── Selected platforms ──
+        if (_selected.isNotEmpty) ...[
+          ...List.generate(_selected.length, (i) {
+            final entry = _selected[i];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.primarySurface.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Row(
+                  children: [
+                    Text(entry.emoji, style: const TextStyle(fontSize: 16)),
+                    const Gap(8),
+                    Expanded(
+                      child: Text(entry.name,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
+                    // Mes / Año toggle
+                    GestureDetector(
+                      onTap: () {
+                        setState(() => entry.isAnnual = !entry.isAnnual);
+                        _notify();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: entry.isAnnual
+                              ? AppColors.primary.withOpacity(0.15)
+                              : theme.cardColor,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: AppColors.primary.withOpacity(0.4),
+                          ),
+                        ),
+                        child: Text(
+                          entry.isAnnual ? 'Anual ÷12' : 'Mensual',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Gap(6),
+                    // Amount
+                    SizedBox(
+                      width: 90,
+                      height: 34,
+                      child: TextField(
+                        controller: entry.ctrl,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) {
+                          _notify();
+                          setState(() {});
+                        },
+                        style: const TextStyle(fontSize: 12),
+                        decoration: InputDecoration(
+                          prefixText: _prefix,
+                          hintText: entry.isAnnual ? 'Valor año' : '0',
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 8),
+                        ),
+                      ),
+                    ),
+                    const Gap(2),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                          minWidth: 28, minHeight: 28),
+                      onPressed: () => _remove(entry),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          const Gap(4),
+        ],
+
+        // ── Chip grid by category ──
+        ..._platformCategories.map((cat) {
+          final opts =
+              _platformOptions.where((p) => p.category == cat).toList();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4, top: 8),
+                child: Text(cat,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: AppColors.textSecondaryDark,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    )),
+              ),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: opts.map((opt) {
+                  final sel = _selectedIds.contains(opt.id);
+                  return GestureDetector(
+                    onTap: () => _toggle(opt),
+                    child: AnimatedContainer(
+                      duration: AppConstants.animFast,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: sel
+                            ? AppColors.primary
+                            : theme.cardColor,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: sel
+                              ? AppColors.primary
+                              : theme.dividerColor,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(opt.emoji,
+                              style: const TextStyle(fontSize: 13)),
+                          const Gap(4),
+                          Text(opt.name,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: sel
+                                    ? Colors.white
+                                    : theme.textTheme.bodySmall?.color,
+                              )),
+                          if (sel) ...[
+                            const Gap(4),
+                            const Icon(Icons.check_rounded,
+                                size: 12, color: Colors.white),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          );
+        }),
+
+        const Gap(12),
+
+        // ── Add custom ──
+        if (!_showCustomForm)
+          GestureDetector(
+            onTap: () => setState(() => _showCustomForm = true),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_circle_outline_rounded,
+                    size: 16, color: AppColors.primary),
+                const Gap(6),
+                Text('Agregar otra plataforma',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    )),
+              ],
+            ),
+          )
+        else ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primarySurface.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Emoji:',
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+                const Gap(6),
+                Wrap(
+                  spacing: 6,
+                  children: _customEmojis.map((e) {
+                    final sel = _customEmoji == e;
+                    return GestureDetector(
+                      onTap: () => setState(() => _customEmoji = e),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? AppColors.primarySurface
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: sel
+                                ? AppColors.primary
+                                : theme.dividerColor,
+                            width: sel ? 1.5 : 1,
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(e,
+                            style: const TextStyle(fontSize: 18)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const Gap(10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _customNameCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'Nombre de la plataforma',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
+                        ),
+                        onSubmitted: (_) => _addCustom(),
+                      ),
+                    ),
+                    const Gap(8),
+                    ElevatedButton(
+                      onPressed: _addCustom,
+                      style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12)),
+                      child: const Text('Agregar'),
+                    ),
+                    const Gap(4),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () =>
+                          setState(() => _showCustomForm = false),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        const Gap(8),
       ],
     );
   }
