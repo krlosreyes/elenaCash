@@ -130,9 +130,8 @@ class ConsciousPlanScreen extends ConsumerWidget {
               const Gap(24),
 
               // ── Automatizaciones ──────────────────────────
-              if (!plan.automationsConfigured)
-                _AutomationsCard(userId: user?.uid ?? '')
-                    .animate().fadeIn(delay: 400.ms),
+              _AutomationsCard(plan: plan, userId: user?.uid ?? '')
+                  .animate().fadeIn(delay: 400.ms),
 
               const Gap(24),
             ],
@@ -366,66 +365,212 @@ class _BucketDetailCardState extends ConsumerState<_BucketDetailCard> {
   double get budget => widget.budget;
 }
 
-class _AutomationsCard extends StatelessWidget {
+class _AutomationsCard extends ConsumerStatefulWidget {
+  final ConsciousPlanEntity plan;
   final String userId;
-  const _AutomationsCard({required this.userId});
+  const _AutomationsCard({required this.plan, required this.userId});
+
+  @override
+  ConsumerState<_AutomationsCard> createState() => _AutomationsCardState();
+}
+
+class _AutomationsCardState extends ConsumerState<_AutomationsCard> {
+  bool _savingsConfigured = false;
+  bool _investConfigured = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _savingsConfigured = widget.plan.automationsConfigured;
+    _investConfigured = widget.plan.automationsConfigured;
+  }
+
+  String _fmt(double v) {
+    final currency = 'COP';
+    if (currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  void _onToggle() async {
+    final allDone = _savingsConfigured && _investConfigured;
+    if (allDone && !widget.plan.automationsConfigured) {
+      await ref.read(consciousPlanProvider.notifier).markAutomationsConfigured(
+        userId: widget.userId,
+      );
+    }
+    setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final savBudget = widget.plan.savingsBudget;
+    final invBudget = widget.plan.investmentsBudget;
+    final allDone = _savingsConfigured && _investConfigured;
+
+    if (allDone && widget.plan.automationsConfigured) {
+      // Compact "sistema activo" badge
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+          border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20),
+            const Gap(10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Sistema de automatización activo',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w700, color: AppColors.primary)),
+                  Text('El dinero trabaja solo. Tú decides el resto.',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: AppColors.textSecondaryDark)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.08),
+        color: AppColors.warning.withOpacity(0.06),
         borderRadius: BorderRadius.circular(AppConstants.cardRadius),
-        border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
-            const Icon(Icons.schedule_rounded, color: AppColors.warning, size: 20),
-            const Gap(8),
-            Text('Configura tus automatizaciones',
-                style: theme.textTheme.titleMedium?.copyWith(color: AppColors.warning)),
-          ]),
-          const Gap(8),
-          Text(
-            'Para que el sistema funcione solo, programa transferencias automáticas '
-            'el día de tu pago: ahorro → cuenta separada, inversiones → fondo.',
-            style: theme.textTheme.bodySmall,
+          Row(
+            children: [
+              const Icon(Icons.bolt_rounded, color: AppColors.warning, size: 20),
+              const Gap(8),
+              Text('Activa tu sistema automático',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(color: AppColors.warning, fontWeight: FontWeight.w700)),
+            ],
           ),
-          const Gap(12),
-          const _AutoStep(step: '1', text: 'Crea una cuenta de ahorros separada para tu fondo de emergencia'),
-          const _AutoStep(step: '2', text: 'Programa transferencia automática el día 15 y el último día del mes'),
-          const _AutoStep(step: '3', text: 'Configura débito automático para tu fondo de inversión (ej: Rappi Invest, Tyba)'),
+          const Gap(4),
+          Text(
+            'Configura estas 2 transferencias y el sistema funciona solo.',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: AppColors.textSecondaryDark),
+          ),
+          const Gap(14),
+
+          // Step 1 — Savings
+          _AutoStep2(
+            done: _savingsConfigured,
+            emoji: '🏦',
+            title: 'Ahorro automático',
+            detail: savBudget > 0
+                ? 'Transfiere ${_fmt(savBudget)} el día de tu pago a una cuenta separada.'
+                : 'Transfiere tu presupuesto de ahorro a una cuenta separada.',
+            onToggle: (v) {
+              _savingsConfigured = v;
+              _onToggle();
+            },
+          ),
+          const Gap(10),
+
+          // Step 2 — Investments
+          _AutoStep2(
+            done: _investConfigured,
+            emoji: '📈',
+            title: 'Inversión automática',
+            detail: invBudget > 0
+                ? 'Programa ${_fmt(invBudget)}/mes en tu fondo o CDT (Rappi Invest, Tyba, Bancolombia).'
+                : 'Configura débito automático a tu fondo de inversión.',
+            onToggle: (v) {
+              _investConfigured = v;
+              _onToggle();
+            },
+          ),
+
+          if (allDone) ...[
+            const Gap(14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('Marcar sistema como activo'),
+                onPressed: () async {
+                  await ref.read(consciousPlanProvider.notifier)
+                      .markAutomationsConfigured(userId: widget.userId);
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _AutoStep extends StatelessWidget {
-  final String step, text;
-  const _AutoStep({required this.step, required this.text});
+class _AutoStep2 extends StatelessWidget {
+  final bool done;
+  final String emoji, title, detail;
+  final ValueChanged<bool> onToggle;
+
+  const _AutoStep2({
+    required this.done,
+    required this.emoji,
+    required this.title,
+    required this.detail,
+    required this.onToggle,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+    final theme = Theme.of(context);
+    return AnimatedContainer(
+      duration: AppConstants.animFast,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: done
+            ? AppColors.primary.withOpacity(0.08)
+            : theme.cardColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: done ? AppColors.primary.withOpacity(0.4) : theme.dividerColor,
+        ),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 20,
-            height: 20,
-            decoration: const BoxDecoration(color: AppColors.warning, shape: BoxShape.circle),
-            child: Center(
-              child: Text(step, style: const TextStyle(fontSize: 11, color: Colors.black, fontWeight: FontWeight.w700)),
+          Text(emoji, style: const TextStyle(fontSize: 20)),
+          const Gap(10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600,
+                            color: done ? AppColors.primary : null)),
+                const Gap(2),
+                Text(detail, style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark, height: 1.3)),
+              ],
             ),
           ),
-          const Gap(10),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+          const Gap(8),
+          Switch.adaptive(
+            value: done,
+            onChanged: onToggle,
+            activeColor: AppColors.primary,
+          ),
         ],
       ),
     );

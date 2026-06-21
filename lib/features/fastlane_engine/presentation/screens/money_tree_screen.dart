@@ -132,6 +132,15 @@ class _MoneyTreeScreenState extends ConsumerState<MoneyTreeScreen> {
 
           const Gap(24),
 
+          // ── Libertad Financiera ────────────────────────
+          if (branches.isNotEmpty)
+            _FreedomMetricCard(
+              totalPassive: totalPassive,
+              entity: entity,
+              currency: currency,
+            ).animate().fadeIn(delay: 260.ms),
+          const Gap(16),
+
           // ── Concepto DeMarco ───────────────────────────
           _DeMarcoCard().animate().fadeIn(delay: 300.ms),
           const Gap(24),
@@ -421,6 +430,118 @@ class _ExampleChip extends StatelessWidget {
           Text(emoji, style: const TextStyle(fontSize: 14)),
           const Gap(6),
           Text(label, style: const TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Freedom Metric Card ───────────────────────────────────────────
+
+class _FreedomMetricCard extends StatelessWidget {
+  final double totalPassive;
+  final FastLaneEntity? entity;
+  final String currency;
+
+  const _FreedomMetricCard({
+    required this.totalPassive,
+    required this.entity,
+    required this.currency,
+  });
+
+  String _fmt(double v) {
+    if (currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final expenses = entity?.activeIncomeMonthly ?? 0;
+    // Use stored totalMonthlyExpenses if available, else estimate from active income
+    final monthlyNeeds = expenses > 0 ? expenses * 0.55 : 0.0; // ~55% fixed costs estimate
+
+    // Freedom ratio: how much of monthly needs is covered by passive income
+    final coveragePct = monthlyNeeds > 0
+        ? (totalPassive / monthlyNeeds).clamp(0.0, 1.0)
+        : 0.0;
+
+    // Years to freedom at current growth (simplified: if passive < needs)
+    final remaining = (monthlyNeeds - totalPassive).clamp(0.0, double.infinity);
+
+    String freedomText;
+    if (totalPassive >= monthlyNeeds && monthlyNeeds > 0) {
+      freedomText = '¡Tu árbol ya cubre tus gastos fijos! 🎉';
+    } else if (monthlyNeeds <= 0) {
+      freedomText = 'Agrega tus gastos en el onboarding para ver tu camino.';
+    } else {
+      freedomText = 'Faltan ${_fmt(remaining)}/mes para cubrir tus gastos fijos con ingreso pasivo.';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primarySurface,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('🏁', style: TextStyle(fontSize: 20)),
+              const Gap(8),
+              Text('Libertad Financiera',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700, color: AppColors.primary)),
+            ],
+          ),
+          const Gap(12),
+          // Progress bar
+          Stack(
+            children: [
+              Container(
+                height: 10,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+              FractionallySizedBox(
+                widthFactor: coveragePct,
+                child: Container(
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Gap(8),
+          Row(
+            children: [
+              Text(
+                '${(coveragePct * 100).toStringAsFixed(0)}% del camino',
+                style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700, color: AppColors.primary),
+              ),
+              const Spacer(),
+              Text(
+                '${_fmt(totalPassive)} / ${_fmt(monthlyNeeds)}/mes',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark),
+              ),
+            ],
+          ),
+          const Gap(8),
+          Text(freedomText,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
         ],
       ),
     );

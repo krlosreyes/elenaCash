@@ -50,6 +50,37 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
     super.dispose();
   }
 
+  /// Convierte una clave del breakdown de ingresos en una rama del árbol.
+  Map<String, dynamic>? _incomeBreakdownToBranch(String key, double monthly, String uid) {
+    if (monthly <= 0) return null;
+    String label, type;
+    switch (key) {
+      case 'plat_cdt':
+      case 'totalCDT':
+        label = 'CDT'; type = 'investment';
+      case 'plat_fondos':
+      case 'totalFondos':
+        label = 'Fondos / ETFs'; type = 'investment';
+      case 'plat_arriendo':
+      case 'totalArriendo':
+        label = 'Arriendos'; type = 'rental';
+      case 'plat_negocio':
+      case 'totalNegocio':
+        label = 'Distribuciones de negocio'; type = 'business';
+      default:
+        label = 'Ingresos adicionales'; type = 'other';
+    }
+    return {
+      'id': 'onboarding_$key',
+      'label': label,
+      'type': type,
+      'monthlyAmount': monthly,
+      'userId': uid,
+      'isActive': true,
+      'createdAt': DateTime.now().toIso8601String(),
+    };
+  }
+
   void _next() {
     if (_page < 5) {
       _controller.nextPage(
@@ -132,6 +163,53 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
           'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
         });
+      }
+
+      // 4. Árbol del Dinero — poblar desde ingresos pasivos capturados
+      if (_additionalIncome > 0) {
+        final fastlaneRef = firestore
+            .collection(AppConstants.colUsers)
+            .doc(uid)
+            .collection(AppConstants.colFastlaneEngine)
+            .doc('current');
+
+        // Crear ramas desde el breakdown de ingresos adicionales
+        final branches = <Map<String, dynamic>>[];
+        _incomeBreakdown.forEach((key, value) {
+          if (!key.startsWith('plat_') && value is num && value > 0) {
+            final branchData = _incomeBreakdownToBranch(key, value.toDouble(), uid);
+            if (branchData != null) branches.add(branchData);
+          }
+        });
+
+        // Si no hay breakdown detallado, crear una rama genérica
+        if (branches.isEmpty && _additionalIncome > 0) {
+          branches.add({
+            'id': 'onboarding_passive',
+            'label': 'Ingresos pasivos',
+            'type': 'investment',
+            'monthlyAmount': _additionalIncome,
+            'userId': uid,
+            'isActive': true,
+            'createdAt': DateTime.now().toIso8601String(),
+          });
+        }
+
+        final passiveRatio = income > 0 ? (_additionalIncome / income) * 100 : 0.0;
+        double score = passiveRatio * 0.7;
+        if (_additionalIncome >= 500000) score += 10;
+        if (_additionalIncome >= 2000000) score += 10;
+        if (_additionalIncome >= 5000000) score += 10;
+
+        batch.set(fastlaneRef, {
+          'userId': uid,
+          'activeIncomeMonthly': _netMonthlyIncome,
+          'passiveIncomeMonthly': _additionalIncome,
+          'fastLaneScore': score.clamp(0, 100),
+          'moneyTreeBranches': branches,
+          'totalMonthlyExpenses': totalExpenses,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
       }
 
       await batch.commit();
@@ -3509,6 +3587,18 @@ class _DiagnosisPageState extends State<_DiagnosisPage> {
 
         const Gap(24),
 
+        // ── Action plan ──
+        _ActionPlanSection(
+          income: income,
+          savBudget: income * _savPct / 100,
+          invBudget: income * _invPct / 100,
+          debtPayments: widget.totalDebtPayments,
+          diagnosis: diagnosis,
+          fmt: _fmt,
+        ).animate(delay: 300.ms).fadeIn(),
+
+        const Gap(24),
+
         // ── CTA ──
         SizedBox(
           width: double.infinity,
@@ -3533,6 +3623,177 @@ class _DiagnosisPageState extends State<_DiagnosisPage> {
           ),
         ),
         const Gap(24),
+      ],
+    );
+  }
+}
+
+// ── Action plan section (inside diagnosis + dashboard) ─────────────
+
+class _ActionData {
+  final String emoji, title, description;
+  const _ActionData({required this.emoji, required this.title, required this.description});
+}
+
+class _ActionPlanSection extends StatelessWidget {
+  final double income, savBudget, invBudget, debtPayments;
+  final _FinancialDiagnosis diagnosis;
+  final String Function(double) fmt;
+
+  const _ActionPlanSection({
+    required this.income,
+    required this.savBudget,
+    required this.invBudget,
+    required this.debtPayments,
+    required this.diagnosis,
+    required this.fmt,
+  });
+
+  List<_ActionData> get _actions {
+    final list = <_ActionData>[];
+
+    // 1. Savings automation
+    if (savBudget > 0) {
+      list.add(_ActionData(
+        emoji: '🏦',
+        title: 'Automatiza tu ahorro',
+        description:
+            'El día de tu pago, transfiere ${fmt(savBudget)} a una cuenta separada. '
+            'Hazlo automático — no cuentes con la fuerza de voluntad.',
+      ));
+    }
+
+    // 2. Investment automation
+    if (invBudget > 0) {
+      list.add(_ActionData(
+        emoji: '📈',
+        title: 'Activa tus inversiones',
+        description:
+            'Programa ${fmt(invBudget)}/mes en un fondo de inversión o CDT. '
+            'Es tu árbol del dinero: cada peso aquí genera más pesos sin tu tiempo.',
+      ));
+    }
+
+    // 3. Debt attack
+    if (debtPayments > 0) {
+      final extra = (income * 0.03).clamp(50000.0, 500000.0);
+      list.add(_ActionData(
+        emoji: '💳',
+        title: 'Golpea tu deuda más cara',
+        description:
+            'Identifica la deuda de mayor tasa EA y paga ${fmt(extra)} extra este mes. '
+            'Ese dinero puede eliminar meses o años de pagos futuros.',
+      ));
+    }
+
+    // 4. Emergency fund (if no debt or already have 2 actions)
+    if (list.length < 3 && savBudget > 0 && income > 0) {
+      final target = income * 3;
+      final months = savBudget > 0 ? (target / savBudget).ceil() : 0;
+      list.add(_ActionData(
+        emoji: '🛡️',
+        title: 'Construye tu colchón de emergencia',
+        description:
+            'Meta: ${fmt(target)} (3 meses de ingresos). '
+            'Ahorrando ${fmt(savBudget)}/mes lo alcanzas en ~$months meses. '
+            'Ponlo en una cuenta diferente, no la toques.',
+      ));
+    }
+
+    // 5. Thriving bonus action
+    if (diagnosis == _FinancialDiagnosis.thriving && list.length < 3) {
+      list.add(_ActionData(
+        emoji: '🌳',
+        title: 'Siembra en el Árbol del Dinero',
+        description:
+            'Tienes margen financiero. Invierte en un CDT, ETF o fondo de largo plazo. '
+            'El ingreso pasivo es lo que te compra tiempo libre.',
+      ));
+    }
+
+    return list.take(3).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final actions = _actions;
+    if (actions.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('⚡', style: TextStyle(fontSize: 18)),
+            const Gap(8),
+            Text('Tu plan de acción',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        const Gap(4),
+        Text(
+          '${actions.length} pasos concretos para este mes',
+          style: theme.textTheme.labelSmall
+              ?.copyWith(color: AppColors.textSecondaryDark),
+        ),
+        const Gap(12),
+        ...actions.asMap().entries.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 26,
+                    height: 26,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text('${e.key + 1}',
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.black)),
+                    ),
+                  ),
+                  const Gap(10),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.primarySurface.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: AppColors.primary.withOpacity(0.2)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(e.value.emoji,
+                                  style: const TextStyle(fontSize: 14)),
+                              const Gap(6),
+                              Text(e.value.title,
+                                  style: theme.textTheme.bodySmall
+                                      ?.copyWith(fontWeight: FontWeight.w700)),
+                            ],
+                          ),
+                          const Gap(4),
+                          Text(e.value.description,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                  color: AppColors.textSecondaryDark,
+                                  height: 1.4)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )),
       ],
     );
   }

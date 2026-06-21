@@ -8,7 +8,9 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/router/app_router.dart';
 import '../providers/education_provider.dart';
+import '../providers/quiz_provider.dart';
 import '../../domain/entities/lesson_entity.dart';
+import '../../domain/entities/quiz_entity.dart';
 
 class EducationHomeScreen extends ConsumerWidget {
   const EducationHomeScreen({super.key});
@@ -20,6 +22,8 @@ class EducationHomeScreen extends ConsumerWidget {
     final progress = progressAsync.asData?.value;
     final weeklyLessonAsync = ref.watch(weeklyLessonProvider);
     final allLessonsAsync = ref.watch(availableLessonsProvider);
+    final quizzesAsync = ref.watch(availableQuizzesProvider);
+    final attemptsAsync = ref.watch(quizAttemptsProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Aprende')),
@@ -74,6 +78,38 @@ class EducationHomeScreen extends ConsumerWidget {
                   ).animate().fadeIn(delay: Duration(milliseconds: 220 + e.key * 40));
                 }).toList(),
               ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Text('Error: $e'),
+            ),
+            const Gap(32),
+
+            // ── Quizzes ─────────────────────────────────────
+            Text('Pon a prueba tu conocimiento', style: theme.textTheme.titleLarge)
+                .animate().fadeIn(delay: 300.ms),
+            const Gap(4),
+            Text(
+              'Responde correctamente y gana XP extra.',
+              style: theme.textTheme.bodySmall,
+            ).animate().fadeIn(delay: 340.ms),
+            const Gap(12),
+
+            quizzesAsync.when(
+              data: (quizzes) {
+                final attempts = attemptsAsync.asData?.value ?? [];
+                return Column(
+                  children: quizzes.asMap().entries.map((e) {
+                    final quiz = e.value;
+                    final lastAttempt = attempts
+                        .where((a) => a.quizId == quiz.id)
+                        .firstOrNull;
+                    return _QuizCard(
+                      quiz: quiz,
+                      lastAttempt: lastAttempt,
+                      onTap: () => context.push('${AppRoutes.education}/quiz/${quiz.id}'),
+                    ).animate().fadeIn(delay: Duration(milliseconds: 360 + e.key * 60));
+                  }).toList(),
+                );
+              },
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Text('Error: $e'),
             ),
@@ -195,6 +231,109 @@ class _FeaturedLessonCard extends StatelessWidget {
                       color: isCompleted ? AppColors.primary : AppColors.textSecondaryDark,
                       fontWeight: FontWeight.w600,
                     )),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuizCard extends StatelessWidget {
+  final QuizEntity quiz;
+  final QuizAttemptEntity? lastAttempt;
+  final VoidCallback onTap;
+  const _QuizCard({required this.quiz, this.lastAttempt, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final attempted = lastAttempt != null;
+    final passed = lastAttempt?.passed ?? false;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+          border: Border.all(
+            color: passed
+                ? AppColors.primary.withOpacity(0.4)
+                : theme.dividerColor,
+            width: passed ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.primarySurface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Center(
+                child: Text(quiz.emoji, style: const TextStyle(fontSize: 24)),
+              ),
+            ),
+            const Gap(14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(quiz.topic.label,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppColors.primary, fontSize: 11)),
+                      if (attempted) ...[
+                        const Gap(6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: passed
+                                ? AppColors.primary.withOpacity(0.1)
+                                : const Color(0xFFD85A30).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '${lastAttempt!.score}/${lastAttempt!.totalQuestions}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: passed ? AppColors.primary : const Color(0xFFD85A30),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const Gap(2),
+                  Text(quiz.title, style: theme.textTheme.titleMedium),
+                  Text(quiz.description, style: theme.textTheme.bodySmall),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '+${quiz.xpReward} XP',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700),
+                ),
+                const Gap(4),
+                Icon(
+                  passed ? Icons.replay_rounded : Icons.play_circle_outline_rounded,
+                  color: AppColors.primary,
+                  size: 22,
+                ),
               ],
             ),
           ],

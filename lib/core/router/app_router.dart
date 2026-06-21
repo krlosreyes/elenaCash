@@ -21,6 +21,7 @@ import '../../features/savings_goals/presentation/screens/goals_screen.dart';
 import '../../features/monthly_review/presentation/screens/monthly_review_screen.dart';
 import '../../features/education/presentation/screens/daily_lesson_screen.dart';
 import '../../features/education/presentation/screens/education_home_screen.dart';
+import '../../features/education/presentation/screens/quiz_screen.dart';
 import '../../features/settings/presentation/screens/settings_screen.dart';
 import '../../features/settings/presentation/screens/subscription_screen.dart';
 import '../../shared/providers/firebase_providers.dart';
@@ -45,6 +46,7 @@ abstract class AppRoutes {
   static const monthlyReview = '/monthly-review';
   static const education = '/education';
   static const dailyLesson = '/education/lesson/:id';
+  static const quiz = '/education/quiz/:id';
   static const settings = '/settings';
   static const subscription = '/settings/subscription';
 }
@@ -151,6 +153,13 @@ GoRouter appRouter(Ref ref) {
                 name: 'daily-lesson',
                 builder: (ctx, state) => DailyLessonScreen(
                   lessonId: state.pathParameters['id']!,
+                ),
+              ),
+              GoRoute(
+                path: 'quiz/:id',
+                name: 'quiz',
+                builder: (ctx, state) => QuizScreen(
+                  quizId: state.pathParameters['id']!,
                 ),
               ),
             ],

@@ -42,6 +42,10 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
     final monthKey = DateHelpers.currentMonthKey();
     final reviewAsync = ref.watch(currentMonthReviewProvider);
     final review = reviewAsync.asData?.value;
+    final historyAsync = ref.watch(monthlyReviewHistoryProvider);
+    final history = historyAsync.asData?.value ?? [];
+    // Previous month = first completed snapshot that isn't the current month
+    final prev = history.where((r) => r.monthKey != monthKey && r.isCompleted).firstOrNull;
 
     return Scaffold(
       appBar: AppBar(title: Text('Revisión ${DateHelpers.formatMonth(DateTime.now())}')),
@@ -56,6 +60,11 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
                   .animate().fadeIn(),
               const Gap(20),
 
+              // ── Insights automáticos ───────────────
+              _AutoInsightsCard(current: review, previous: prev)
+                  .animate().fadeIn(delay: 80.ms),
+              const Gap(16),
+
               // ── Cubos del mes ──────────────────────
               Text('Cómo quedaron tus cubos', style: theme.textTheme.titleLarge)
                   .animate().fadeIn(delay: 100.ms),
@@ -64,6 +73,7 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
                 label: '🏠 Gastos Fijos',
                 actual: review.fixedCostsActual,
                 budget: review.fixedCostsBudget,
+                prevActual: prev?.fixedCostsActual,
                 currency: currency,
                 lowerIsBetter: true,
               ).animate().fadeIn(delay: 150.ms),
@@ -71,6 +81,7 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
                 label: '🏦 Ahorro',
                 actual: review.savingsActual,
                 budget: review.savingsBudget,
+                prevActual: prev?.savingsActual,
                 currency: currency,
                 lowerIsBetter: false,
               ).animate().fadeIn(delay: 175.ms),
@@ -78,6 +89,7 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
                 label: '📈 Inversiones',
                 actual: review.investmentsActual,
                 budget: review.investmentsBudget,
+                prevActual: prev?.investmentsActual,
                 currency: currency,
                 lowerIsBetter: false,
               ).animate().fadeIn(delay: 200.ms),
@@ -85,6 +97,7 @@ class _MonthlyReviewScreenState extends ConsumerState<MonthlyReviewScreen> {
                 label: '🎉 Gasto Libre',
                 actual: review.guiltFreeActual,
                 budget: review.guiltFreeBudget,
+                prevActual: prev?.guiltFreeActual,
                 currency: currency,
                 lowerIsBetter: false,
               ).animate().fadeIn(delay: 225.ms),
@@ -286,15 +299,115 @@ class _Check extends StatelessWidget {
   }
 }
 
+class _AutoInsightsCard extends StatelessWidget {
+  final MonthlyReviewEntity current;
+  final MonthlyReviewEntity? previous;
+  const _AutoInsightsCard({required this.current, this.previous});
+
+  List<({String emoji, String text, bool positive})> get _insights {
+    final list = <({String emoji, String text, bool positive})>[];
+    final prev = previous;
+
+    if (prev != null) {
+      // Fixed costs delta
+      final fixedDelta = current.fixedCostsActual - prev.fixedCostsActual;
+      if (fixedDelta.abs() > 0.01) {
+        final pct = prev.fixedCostsActual > 0
+            ? (fixedDelta.abs() / prev.fixedCostsActual * 100).toStringAsFixed(0)
+            : '0';
+        list.add(fixedDelta < 0
+            ? (emoji: '✅', text: 'Gastos fijos bajaron $pct% vs. el mes anterior.', positive: true)
+            : (emoji: '⚠️', text: 'Gastos fijos subieron $pct% vs. el mes anterior.', positive: false));
+      }
+
+      // Savings delta
+      final savDelta = current.savingsActual - prev.savingsActual;
+      if (savDelta.abs() > 0.01) {
+        final pct = prev.savingsActual > 0
+            ? (savDelta.abs() / prev.savingsActual * 100).toStringAsFixed(0)
+            : '0';
+        list.add(savDelta > 0
+            ? (emoji: '🏦', text: 'Ahorraste $pct% más que el mes pasado. Vas bien.', positive: true)
+            : (emoji: '🔻', text: 'Ahorraste $pct% menos que el mes pasado.', positive: false));
+      }
+
+      // Health score delta
+      final scoreDelta = current.healthScore - prev.healthScore;
+      if (scoreDelta.abs() >= 10) {
+        list.add(scoreDelta > 0
+            ? (emoji: '📈', text: 'Tu salud financiera mejoró ${scoreDelta.toStringAsFixed(0)} puntos este mes.', positive: true)
+            : (emoji: '📉', text: 'Tu salud financiera bajó ${scoreDelta.abs().toStringAsFixed(0)} puntos. Revisa qué salió diferente.', positive: false));
+      }
+    }
+
+    // Current month standalone insights
+    if (current.hitSavingsGoal) {
+      list.add((emoji: '🎯', text: 'Alcanzaste tu meta de ahorro este mes.', positive: true));
+    }
+    if (current.hitInvestmentsGoal) {
+      list.add((emoji: '📈', text: 'Completaste tu meta de inversión.', positive: true));
+    }
+    if (!current.stayedInFixedBudget) {
+      list.add((emoji: '🚨', text: 'Tus gastos fijos excedieron el presupuesto.', positive: false));
+    }
+
+    return list.take(3).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final insights = _insights;
+    if (insights.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('💡 Insights del mes',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w700)),
+          const Gap(10),
+          ...insights.map((i) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(i.emoji, style: const TextStyle(fontSize: 14)),
+                    const Gap(8),
+                    Expanded(
+                      child: Text(i.text,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: i.positive ? null : AppColors.error,
+                            height: 1.3,
+                          )),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
 class _BucketResultRow extends StatelessWidget {
   final String label, currency;
   final double actual, budget;
+  final double? prevActual;
   final bool lowerIsBetter;
 
   const _BucketResultRow({
     required this.label,
     required this.actual,
     required this.budget,
+    this.prevActual,
     required this.currency,
     required this.lowerIsBetter,
   });
@@ -304,12 +417,30 @@ class _BucketResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final prev = prevActual;
+    final hasDelta = prev != null && prev > 0;
+    final delta = hasDelta ? actual - prev! : 0.0;
+    final deltaIsGood = lowerIsBetter ? delta <= 0 : delta >= 0;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          Text(label, style: theme.textTheme.bodyMedium),
-          const Spacer(),
+          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+          if (hasDelta) ...[
+            Icon(
+              delta > 0 ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+              size: 13,
+              color: deltaIsGood ? AppColors.primary : AppColors.error,
+            ),
+            Text(
+              '${delta.abs() > 0 ? CurrencyFormatter.formatCompact(delta.abs(), currency) : '='}',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: deltaIsGood ? AppColors.primary : AppColors.error,
+              ),
+            ),
+            const Gap(6),
+          ],
           Text(
             CurrencyFormatter.formatCompact(actual, currency),
             style: theme.textTheme.bodyMedium?.copyWith(

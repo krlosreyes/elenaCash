@@ -8,6 +8,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../conscious_plan/presentation/providers/conscious_plan_provider.dart';
 import '../../domain/entities/goal_entity.dart';
 import '../providers/goals_provider.dart';
 
@@ -44,6 +45,9 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen> {
     final currency = user?.currency ?? 'COP';
     final goalsAsync = ref.watch(savingsGoalsProvider);
 
+    final planAsync = ref.watch(consciousPlanWatchProvider);
+    final savingsBudget = planAsync.asData?.value?.savingsBudget ?? 0.0;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Metas de Ahorro'),
@@ -55,56 +59,123 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen> {
         ],
       ),
       body: goalsAsync.when(
-        data: (goals) => ListView(
-          padding: const EdgeInsets.all(AppConstants.defaultPadding),
-          children: [
-            // ── Form ──────────────────────────────────
-            if (_showForm) ...[
-              _AddGoalForm(
-                nameCtrl: _nameCtrl,
-                targetCtrl: _targetCtrl,
-                currentCtrl: _currentCtrl,
-                monthlyCtrl: _monthlyCtrl,
-                category: _category,
-                currency: currency,
-                onCategoryChanged: (c) => setState(() => _category = c),
-                onSave: () async {
-                  final target = double.tryParse(_targetCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
-                  final current = double.tryParse(_currentCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
-                  final monthly = double.tryParse(_monthlyCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
-                  if (_nameCtrl.text.isEmpty || target <= 0) return;
+        data: (goals) {
+          final activeGoals = goals.where((g) => !g.isCompleted).toList();
+          return ListView(
+            padding: const EdgeInsets.all(AppConstants.defaultPadding),
+            children: [
+              // ── Plan de ahorro banner ──────────────────
+              if (savingsBudget > 0) ...[
+                _SavingsPlanBanner(
+                  savingsBudget: savingsBudget,
+                  currency: currency,
+                  numGoals: activeGoals.length,
+                ).animate().fadeIn(),
+                const Gap(12),
+              ],
 
-                  await ref.read(goalsProvider.notifier).addGoal(
-                    userId: user?.uid ?? '',
-                    name: _nameCtrl.text,
-                    emoji: '🎯',
-                    category: _category,
-                    targetAmount: target,
-                    monthlyContribution: monthly,
-                  );
-                  _nameCtrl.clear(); _targetCtrl.clear();
-                  _currentCtrl.clear(); _monthlyCtrl.clear();
-                  setState(() => _showForm = false);
-                },
-              ).animate().fadeIn(),
-              const Gap(16),
+              // ── Form ──────────────────────────────────
+              if (_showForm) ...[
+                _AddGoalForm(
+                  nameCtrl: _nameCtrl,
+                  targetCtrl: _targetCtrl,
+                  currentCtrl: _currentCtrl,
+                  monthlyCtrl: _monthlyCtrl,
+                  category: _category,
+                  currency: currency,
+                  onCategoryChanged: (c) => setState(() => _category = c),
+                  onSave: () async {
+                    final target = double.tryParse(_targetCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+                    final current = double.tryParse(_currentCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+                    final monthly = double.tryParse(_monthlyCtrl.text.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+                    if (_nameCtrl.text.isEmpty || target <= 0) return;
+
+                    await ref.read(goalsProvider.notifier).addGoal(
+                      userId: user?.uid ?? '',
+                      name: _nameCtrl.text,
+                      emoji: '🎯',
+                      category: _category,
+                      targetAmount: target,
+                      monthlyContribution: monthly,
+                    );
+                    _nameCtrl.clear(); _targetCtrl.clear();
+                    _currentCtrl.clear(); _monthlyCtrl.clear();
+                    setState(() => _showForm = false);
+                  },
+                ).animate().fadeIn(),
+                const Gap(16),
+              ],
+
+              // ── Metas activas ──────────────────────────
+              if (goals.isEmpty && !_showForm)
+                _EmptyGoalsState()
+              else
+                ...goals.asMap().entries.map((e) => _GoalCard(
+                  goal: e.value,
+                  currency: currency,
+                  userId: user?.uid ?? '',
+                  planSavingsBudget: savingsBudget,
+                  numActiveGoals: activeGoals.length,
+                ).animate().fadeIn(delay: Duration(milliseconds: 100 + e.key * 60))),
+
+              const Gap(24),
             ],
-
-            // ── Metas activas ──────────────────────────
-            if (goals.isEmpty && !_showForm)
-              _EmptyGoalsState()
-            else
-              ...goals.asMap().entries.map((e) => _GoalCard(
-                goal: e.value,
-                currency: currency,
-                userId: user?.uid ?? '',
-              ).animate().fadeIn(delay: Duration(milliseconds: 100 + e.key * 60))),
-
-            const Gap(24),
-          ],
-        ),
+          );
+        },
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('Error: $e')),
+      ),
+    );
+  }
+}
+
+// ── Savings Plan Banner ───────────────────────────────────────────
+
+class _SavingsPlanBanner extends StatelessWidget {
+  final double savingsBudget;
+  final String currency;
+  final int numGoals;
+
+  const _SavingsPlanBanner({
+    required this.savingsBudget,
+    required this.currency,
+    required this.numGoals,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final perGoal = numGoals > 0 ? savingsBudget / numGoals : savingsBudget;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.bucketSavings.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: AppColors.bucketSavings.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Text('💰', style: TextStyle(fontSize: 22)),
+          const Gap(10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Plan consciente: ${CurrencyFormatter.format(savingsBudget, currency)}/mes para ahorro',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600, color: AppColors.bucketSavings,
+                  ),
+                ),
+                if (numGoals > 1)
+                  Text(
+                    '≈ ${CurrencyFormatter.format(perGoal, currency)}/mes por meta (÷${numGoals})',
+                    style: theme.textTheme.bodySmall,
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -206,7 +277,16 @@ class _AddGoalForm extends StatelessWidget {
 class _GoalCard extends ConsumerStatefulWidget {
   final GoalEntity goal;
   final String currency, userId;
-  const _GoalCard({required this.goal, required this.currency, required this.userId});
+  final double planSavingsBudget;
+  final int numActiveGoals;
+
+  const _GoalCard({
+    required this.goal,
+    required this.currency,
+    required this.userId,
+    this.planSavingsBudget = 0,
+    this.numActiveGoals = 1,
+  });
 
   @override
   ConsumerState<_GoalCard> createState() => _GoalCardState();
@@ -301,12 +381,22 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
                     ),
                   ],
                 ),
-                if (goal.monthsRemaining > 0) ...[
+                if (goal.monthsRemaining > 0 && goal.monthlyContribution > 0) ...[
                   const Gap(4),
                   Text(
                     '${goal.monthsRemaining} meses restantes · '
                     '${CurrencyFormatter.formatCompact(goal.remaining, widget.currency)} por ahorrar',
                     style: theme.textTheme.bodySmall,
+                  ),
+                ],
+                // ── Plan-backed timeline ─────────────────
+                if (widget.planSavingsBudget > 0 && !isComplete) ...[
+                  const Gap(6),
+                  _PlanTimelineRow(
+                    goal: goal,
+                    planSavingsBudget: widget.planSavingsBudget,
+                    numActiveGoals: widget.numActiveGoals,
+                    currency: widget.currency,
                   ),
                 ],
               ],
@@ -371,6 +461,85 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
                 child: const Text('🎉 Marcar como completada'),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Plan Timeline Row ─────────────────────────────────────────────
+
+class _PlanTimelineRow extends StatelessWidget {
+  final GoalEntity goal;
+  final double planSavingsBudget;
+  final int numActiveGoals;
+  final String currency;
+
+  const _PlanTimelineRow({
+    required this.goal,
+    required this.planSavingsBudget,
+    required this.numActiveGoals,
+    required this.currency,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // Effective monthly: use manual contribution if set, else plan ÷ num goals
+    final effectiveMonthly = goal.monthlyContribution > 0
+        ? goal.monthlyContribution
+        : (numActiveGoals > 0 ? planSavingsBudget / numActiveGoals : planSavingsBudget);
+
+    if (effectiveMonthly <= 0 || goal.remaining <= 0) return const SizedBox.shrink();
+
+    final months = (goal.remaining / effectiveMonthly).ceil();
+    final completionDate = DateTime.now().add(Duration(days: months * 30));
+
+    const monthNames = [
+      '', 'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+      'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+    ];
+    final dateStr = '${monthNames[completionDate.month]} ${completionDate.year}';
+
+    final isUsingPlan = goal.monthlyContribution <= 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.bucketSavings.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule_rounded, size: 13, color: AppColors.bucketSavings),
+          const Gap(5),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                children: [
+                  if (isUsingPlan)
+                    TextSpan(
+                      text: 'Con tu plan de ahorro: ',
+                      style: TextStyle(color: AppColors.bucketSavings, fontWeight: FontWeight.w600),
+                    ),
+                  TextSpan(text: 'lista en '),
+                  TextSpan(
+                    text: '$months ${months == 1 ? 'mes' : 'meses'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: ' · $dateStr'),
+                ],
+              ),
+            ),
+          ),
+          Text(
+            '${CurrencyFormatter.format(effectiveMonthly, currency)}/mes',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 10, color: AppColors.textSecondaryDark,
+            ),
+          ),
         ],
       ),
     );

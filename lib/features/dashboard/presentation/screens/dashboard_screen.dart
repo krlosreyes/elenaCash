@@ -16,6 +16,7 @@ import '../../../conscious_plan/presentation/providers/conscious_plan_provider.d
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../fastlane_engine/domain/entities/fastlane_entity.dart';
 import '../../../fastlane_engine/presentation/providers/fastlane_provider.dart';
+import '../../../market_data/presentation/widgets/trm_widget.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -162,6 +163,12 @@ class _DashboardContent extends StatelessWidget {
         _IncomeCard(plan: plan, currency: currency)
             .animate()
             .fadeIn(duration: AppConstants.animMedium),
+        const Gap(16),
+
+        // ── TRM / Mercados ────────────────────────────────
+        TRMWidget(currency: currency)
+            .animate()
+            .fadeIn(delay: 80.ms),
         const Gap(20),
 
         // ── Cubos ────────────────────────────────────────
@@ -187,18 +194,130 @@ class _DashboardContent extends StatelessWidget {
 
         const Gap(8),
 
+        // ── Próximo movimiento ─────────────────────────
+        _NextMovementCard(plan: plan, currency: currency)
+            .animate()
+            .fadeIn(delay: 480.ms),
+        const Gap(16),
+
         // ── Revisión Mensual CTA ───────────────────────
         _MonthlyReviewCard()
             .animate()
-            .fadeIn(delay: 500.ms),
+            .fadeIn(delay: 540.ms),
         const Gap(16),
 
         // ── Nudge Árbol del Dinero ─────────────────────
         _FastlaneNudgeCard(fastlaneAsync: fastlaneAsync)
             .animate()
-            .fadeIn(delay: 600.ms),
+            .fadeIn(delay: 620.ms),
         const Gap(20),
       ]),
+    );
+  }
+}
+
+// ── Next Movement Card ────────────────────────────────────────────
+
+class _NextMovementCard extends StatelessWidget {
+  final ConsciousPlanEntity plan;
+  final String currency;
+  const _NextMovementCard({required this.plan, required this.currency});
+
+  String _fmt(double v) {
+    if (currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  List<({String emoji, String text, Color color})> get _actions {
+    final list = <({String emoji, String text, Color color})>[];
+
+    // Fixed costs over budget
+    if (plan.fixedCostsActual > plan.fixedCostsBudget) {
+      final over = plan.fixedCostsActual - plan.fixedCostsBudget;
+      list.add((
+        emoji: '🚨',
+        text: 'Gastos fijos excedidos por ${_fmt(over)}. Revisa qué recortar para cerrar el mes en verde.',
+        color: AppColors.error,
+      ));
+    }
+
+    // Savings not hit yet
+    if (plan.savingsActual < plan.savingsBudget && plan.savingsBudget > 0) {
+      final missing = plan.savingsBudget - plan.savingsActual;
+      list.add((
+        emoji: '🏦',
+        text: 'Faltan ${_fmt(missing)} para tu meta de ahorro este mes. Transfiérelos antes del cierre.',
+        color: AppColors.bucketSavings,
+      ));
+    }
+
+    // Investments not done
+    if (plan.investmentsActual == 0 && plan.investmentsBudget > 0) {
+      list.add((
+        emoji: '📈',
+        text: 'Aún no has invertido este mes. Mueve ${_fmt(plan.investmentsBudget)} a tu fondo.',
+        color: AppColors.bucketInvestments,
+      ));
+    }
+
+    // Everything on track + surplus
+    if (list.isEmpty && plan.remainingBudget > 0) {
+      list.add((
+        emoji: '✅',
+        text: 'Vas muy bien. Tienes ${_fmt(plan.remainingBudget)} disponibles — asígnalos o plántalos en el árbol.',
+        color: AppColors.primary,
+      ));
+    }
+
+    return list.take(2).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final actions = _actions;
+    if (actions.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('⚡', style: TextStyle(fontSize: 18)),
+              const Gap(8),
+              Text('Tu próximo movimiento',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const Gap(12),
+          ...actions.map((a) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(a.emoji, style: const TextStyle(fontSize: 16)),
+                    const Gap(8),
+                    Expanded(
+                      child: Text(a.text,
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(height: 1.4)),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
     );
   }
 }

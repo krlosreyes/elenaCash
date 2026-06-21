@@ -104,7 +104,7 @@ class ConsciousPlanNotifier extends _$ConsciousPlanNotifier {
     }
   }
 
-  Future<void> markAutomationsConfigured(String userId) async {
+  Future<void> markAutomationsConfigured({required String userId}) async {
     await ref
         .read(firebaseFirestoreProvider)
         .collection(AppConstants.colUsers)

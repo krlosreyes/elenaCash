@@ -22,6 +22,8 @@ class DebtsListScreen extends ConsumerStatefulWidget {
 
 class _DebtsListScreenState extends ConsumerState<DebtsListScreen> {
   bool _showAddForm = false;
+  bool _showPayoffCalc = false;
+  double _extraPayment = 0;
   DebtStrategy _strategy = DebtStrategy.avalanche;
 
   // Form fields
@@ -78,6 +80,18 @@ class _DebtsListScreenState extends ConsumerState<DebtsListScreen> {
                 selected: _strategy,
                 onChanged: (s) => setState(() => _strategy = s),
               ).animate().fadeIn(delay: 100.ms),
+              const Gap(12),
+
+              // ── Calculadora de liquidación ─────────
+              _PayoffCalculator(
+                debts: debts,
+                strategy: _strategy,
+                extraPayment: _extraPayment,
+                currency: currency,
+                expanded: _showPayoffCalc,
+                onToggle: () => setState(() => _showPayoffCalc = !_showPayoffCalc),
+                onExtraChanged: (v) => setState(() => _extraPayment = v),
+              ).animate().fadeIn(delay: 140.ms),
               const Gap(16),
             ],
 
@@ -380,6 +394,290 @@ class _DebtCard extends ConsumerWidget {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Payoff Calculator ─────────────────────────────────────────────
+
+class _PayoffCalculator extends StatelessWidget {
+  final List<DebtEntity> debts;
+  final DebtStrategy strategy;
+  final double extraPayment;
+  final String currency;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final ValueChanged<double> onExtraChanged;
+
+  const _PayoffCalculator({
+    required this.debts,
+    required this.strategy,
+    required this.extraPayment,
+    required this.currency,
+    required this.expanded,
+    required this.onToggle,
+    required this.onExtraChanged,
+  });
+
+  String _fmt(double v) {
+    if (currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  /// Simula el payoff con estrategia y pago extra usando cascade de deudas.
+  /// Returns (totalMonths, totalInterest)
+  (int, double) _simulate(double extra) {
+    if (debts.isEmpty) return (0, 0);
+
+    // Sort by strategy
+    final sorted = [...debts];
+    if (strategy == DebtStrategy.avalanche) {
+      sorted.sort((a, b) => b.interestRate.compareTo(a.interestRate));
+    } else {
+      sorted.sort((a, b) => a.currentBalance.compareTo(b.currentBalance));
+    }
+
+    // Track balances
+    final balances = sorted.map((d) => d.currentBalance).toList();
+    final rates = sorted.map((d) => d.interestRate / 100 / 12).toList();
+    final minPayments = sorted.map((d) => d.minimumPayment).toList();
+    double totalInterest = 0;
+    int month = 0;
+
+    while (balances.any((b) => b > 0) && month < 600) {
+      month++;
+      double freeExtra = extra;
+
+      // Apply freed payments from paid debts to next (cascade)
+      for (int i = 0; i < balances.length; i++) {
+        if (balances[i] <= 0) {
+          freeExtra += minPayments[i];
+        }
+      }
+
+      // Pay each active debt (focus extra on first unpaid)
+      bool extraApplied = false;
+      for (int i = 0; i < balances.length; i++) {
+        if (balances[i] <= 0) continue;
+        final interest = balances[i] * rates[i];
+        totalInterest += interest;
+        double payment = minPayments[i];
+        if (!extraApplied) {
+          payment += freeExtra;
+          extraApplied = true;
+        }
+        balances[i] = (balances[i] + interest - payment).clamp(0, double.infinity);
+      }
+    }
+    return (month, totalInterest);
+  }
+
+  String _monthsToDate(int months) {
+    final d = DateTime.now().add(Duration(days: months * 30));
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return '${meses[d.month - 1]} ${d.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (debts.isEmpty) return const SizedBox.shrink();
+
+    final (monthsMin, interestMin) = _simulate(0);
+    final (monthsExtra, interestExtra) = _simulate(extraPayment);
+    final monthsSaved = monthsMin - monthsExtra;
+    final interestSaved = interestMin - interestExtra;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  const Text('🧮', style: TextStyle(fontSize: 18)),
+                  const Gap(10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Calculadora de liquidación',
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                        Text(
+                          monthsMin > 0
+                              ? 'Libre de deudas en $monthsMin meses (${_monthsToDate(monthsMin)}) al mínimo'
+                              : 'Simula cuándo quedas libre de deudas',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppColors.textSecondaryDark),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: AppColors.primary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Baseline
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.07),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.error.withOpacity(0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Pagando solo el mínimo',
+                                  style: theme.textTheme.labelMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700)),
+                              Text('Libre: ${_monthsToDate(monthsMin)} ($monthsMin meses)',
+                                  style: theme.textTheme.bodySmall),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('Intereses totales',
+                                style: theme.textTheme.labelSmall
+                                    ?.copyWith(color: AppColors.textSecondaryDark)),
+                            Text(_fmt(interestMin),
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(color: AppColors.error, fontWeight: FontWeight.w700)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Gap(14),
+                  Text('¿Cuánto puedes pagar extra al mes?',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const Gap(8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Slider(
+                          value: extraPayment.clamp(0, 2000000),
+                          min: 0,
+                          max: 2000000,
+                          divisions: 40,
+                          activeColor: AppColors.primary,
+                          onChanged: onExtraChanged,
+                        ),
+                      ),
+                      SizedBox(
+                        width: 100,
+                        child: Text(
+                          _fmt(extraPayment),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary),
+                          textAlign: TextAlign.end,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (extraPayment > 0) ...[
+                    const Gap(12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border:
+                            Border.all(color: AppColors.primary.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Con ${_fmt(extraPayment)} extra/mes:',
+                              style: theme.textTheme.labelMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700,
+                                      color: AppColors.primary)),
+                          const Gap(8),
+                          _CalcRow(
+                            label: 'Libre de deudas',
+                            value: '${_monthsToDate(monthsExtra)} ($monthsExtra meses)',
+                            color: AppColors.primary,
+                          ),
+                          if (monthsSaved > 0)
+                            _CalcRow(
+                              label: 'Meses ahorrados',
+                              value: '$monthsSaved meses menos',
+                              color: AppColors.primary,
+                            ),
+                          if (interestSaved > 0)
+                            _CalcRow(
+                              label: 'Intereses ahorrados',
+                              value: _fmt(interestSaved),
+                              color: AppColors.primary,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CalcRow extends StatelessWidget {
+  final String label, value;
+  final Color color;
+  const _CalcRow({required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark)),
+          ),
+          Text(value,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w700, color: color)),
         ],
       ),
     );
