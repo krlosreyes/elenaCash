@@ -331,6 +331,10 @@ class _ResultView extends StatelessWidget {
     final pct = total > 0 ? correct / total : 0.0;
     final passed = pct >= 0.6;
 
+    // ── Nudge de mejora ──────────────────────────────────────────────
+    // Calcula qué falta para el siguiente nivel y el XP extra que ganaría
+    final nudge = _buildNudge(pct, correct, total, result?.xpEarned ?? 0);
+
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(AppConstants.defaultPadding),
@@ -357,11 +361,13 @@ class _ResultView extends StatelessWidget {
             if (result != null) ...[
               const Gap(8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                  border:
+                      Border.all(color: AppColors.primary.withOpacity(0.3)),
                 ),
                 child: Text(
                   '+${result!.xpEarned} XP ganados',
@@ -370,7 +376,14 @@ class _ResultView extends StatelessWidget {
                 ),
               ),
             ],
-            const Gap(40),
+
+            // ── Nudge: qué falta para subir de nivel ─────────────
+            if (nudge != null) ...[
+              const Gap(16),
+              _ImprovementNudge(nudge: nudge, onRetry: onRetry),
+            ],
+
+            const Gap(32),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -387,5 +400,109 @@ class _ResultView extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Devuelve null si el usuario ya está en el nivel máximo (≥90%).
+  _NudgeData? _buildNudge(
+      double pct, int correct, int total, int xpEarned) {
+    if (total == 0 || pct >= 0.9) return null; // ya es Experto
+
+    if (pct >= 0.7) {
+      return _NudgeData(
+        nextGrade: '🏆 Experto',
+        correctsNeeded: (0.9 * total).ceil() - correct,
+        earnedXP: xpEarned,
+        nextXP: 35,
+        color: AppColors.primary,
+      );
+    }
+
+    if (pct >= 0.6) {
+      return _NudgeData(
+        nextGrade: '⭐ Bueno',
+        correctsNeeded: (0.7 * total).ceil() - correct,
+        earnedXP: xpEarned,
+        nextXP: 25,
+        color: const Color(0xFF4CAF50),
+      );
+    }
+
+    return _NudgeData(
+      nextGrade: '✅ Aprobado',
+      correctsNeeded: (0.6 * total).ceil() - correct,
+      earnedXP: xpEarned,
+      nextXP: 15,
+      color: const Color(0xFFFF9800),
+    );
+  }
+}
+
+// ── Datos del nudge ───────────────────────────────────────────────
+
+class _NudgeData {
+  final String nextGrade;
+  final int correctsNeeded;
+  final int earnedXP;
+  final int nextXP;
+  final Color color;
+  const _NudgeData({
+    required this.nextGrade,
+    required this.correctsNeeded,
+    required this.earnedXP,
+    required this.nextXP,
+    required this.color,
+  });
+}
+
+// ── Widget del nudge ──────────────────────────────────────────────
+
+class _ImprovementNudge extends StatelessWidget {
+  final _NudgeData nudge;
+  final VoidCallback onRetry;
+  const _ImprovementNudge({required this.nudge, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final plural = nudge.correctsNeeded != 1;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: nudge.color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: nudge.color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.trending_up_rounded, color: nudge.color, size: 16),
+              const Gap(6),
+              Text(
+                '¡Casi! Puedes mejorar',
+                style: TextStyle(
+                    color: nudge.color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13),
+              ),
+            ],
+          ),
+          const Gap(6),
+          Text(
+            'Solo ${nudge.correctsNeeded} ${plural ? "respuestas" : "respuesta"} más '
+            'para llegar a ${nudge.nextGrade}',
+            style: theme.textTheme.bodySmall,
+          ),
+          const Gap(4),
+          Text(
+            'Ganarías +${nudge.nextXP} XP en lugar de +${nudge.earnedXP} XP',
+            style:
+                theme.textTheme.bodySmall?.copyWith(color: AppColors.primary),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.05, end: 0);
   }
 }

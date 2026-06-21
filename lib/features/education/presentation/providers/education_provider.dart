@@ -82,8 +82,17 @@ class EducationNotifier extends _$EducationNotifier {
   Future<void> completeLesson(String lessonId) async {
     state = const AsyncLoading();
     try {
-      final snap = await _progressRef.get();
-      final data = snap.exists ? snap.data() as Map<String, dynamic>? : null;
+      final userId = ref.read(currentUserIdProvider);
+      final firestore = ref.read(firebaseFirestoreProvider);
+
+      final progressRef = firestore
+          .collection(AppConstants.colUsers)
+          .doc(userId)
+          .collection(AppConstants.colEducationProgress)
+          .doc('current');
+
+      final snap = await progressRef.get();
+      final data = snap.exists ? snap.data() : null;
 
       final existing = List<String>.from(data?['completedLessons'] ?? []);
 
@@ -107,14 +116,24 @@ class EducationNotifier extends _$EducationNotifier {
         newStreak = 1;
       }
 
-      await _progressRef.set({
+      final batch = firestore.batch();
+
+      batch.set(progressRef, {
         'completedLessons': FieldValue.arrayUnion([lessonId]),
         'totalXP': FieldValue.increment(10),
         'dailyStreakDays': newStreak,
         'lastLessonAt': FieldValue.serverTimestamp(),
-        'currentWeek': existing.length + 2, // avanzar a la siguiente lección
+        'currentWeek': existing.length + 2,
       }, SetOptions(merge: true));
 
+      // Mantener leaderboard sincronizado
+      batch.set(
+        firestore.collection('leaderboard').doc(userId),
+        {'totalXP': FieldValue.increment(10), 'updatedAt': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
+
+      await batch.commit();
       state = const AsyncData(null);
     } catch (e, st) {
       state = AsyncError(e, st);

@@ -7,8 +7,10 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../shared/providers/firebase_providers.dart';
 import '../providers/education_provider.dart';
 import '../providers/quiz_provider.dart';
+import '../widgets/certificate_widget.dart';
 import '../../domain/entities/lesson_entity.dart';
 import '../../domain/entities/quiz_entity.dart';
 
@@ -24,6 +26,8 @@ class EducationHomeScreen extends ConsumerWidget {
     final allLessonsAsync = ref.watch(availableLessonsProvider);
     final quizzesAsync = ref.watch(availableQuizzesProvider);
     final attemptsAsync = ref.watch(quizAttemptsProvider);
+    final leaderboardAsync = ref.watch(leaderboardProvider);
+    final currentUserId = ref.watch(currentUserIdProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Aprende')),
@@ -112,6 +116,56 @@ class EducationHomeScreen extends ConsumerWidget {
               },
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Text('Error: $e'),
+            ),
+            const Gap(32),
+
+            // ── Leaderboard ──────────────────────────────────────────
+            Text('🏆 Top 10 de XP', style: theme.textTheme.titleLarge)
+                .animate().fadeIn(delay: 400.ms),
+            const Gap(4),
+            Text(
+              'Usuarios anónimos ordenados por puntos totales.',
+              style: theme.textTheme.bodySmall,
+            ).animate().fadeIn(delay: 420.ms),
+            const Gap(12),
+
+            leaderboardAsync.when(
+              data: (entries) => entries.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        '¡Sé el primero en el ranking!',
+                        style: theme.textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : Column(
+                      children: entries.asMap().entries.map((e) {
+                        return _LeaderboardRow(
+                          rank: e.key + 1,
+                          entry: e.value,
+                          isCurrentUser: e.value.userId == currentUserId,
+                        ).animate().fadeIn(
+                            delay: Duration(milliseconds: 440 + e.key * 40));
+                      }).toList(),
+                    ),
+              loading: () =>
+                  const Center(child: CircularProgressIndicator()),
+              error: (_, __) => const SizedBox(),
+            ),
+            const Gap(32),
+
+            // ── Certificado ──────────────────────────────────────────
+            quizzesAsync.when(
+              data: (quizzes) {
+                final attempts = attemptsAsync.asData?.value ?? [];
+                return CertificateSection(
+                  quizzes: quizzes,
+                  attempts: attempts,
+                );
+              },
+              loading: () => const SizedBox(),
+              error: (_, __) => const SizedBox(),
             ),
             const Gap(24),
           ],
@@ -379,6 +433,95 @@ class _LessonRow extends StatelessWidget {
           ? const Text('PRO', style: TextStyle(fontSize: 10, color: AppColors.gold, fontWeight: FontWeight.w700))
           : const Icon(Icons.chevron_right_rounded),
       onTap: onTap,
+    );
+  }
+}
+
+// ── Leaderboard Row ───────────────────────────────────────────────
+
+class _LeaderboardRow extends StatelessWidget {
+  final int rank;
+  final LeaderboardEntry entry;
+  final bool isCurrentUser;
+
+  const _LeaderboardRow({
+    required this.rank,
+    required this.entry,
+    required this.isCurrentUser,
+  });
+
+  /// Emoji determinístico basado en userId — anónimo pero consistente.
+  String _avatar(String userId) {
+    const emojis = [
+      '🦊', '🐼', '🦁', '🐸', '🦉', '🐬', '🦋', '🐧',
+      '🦚', '🦜', '🐙', '🦄', '🐺', '🦝', '🦔', '🐻',
+    ];
+    final code = userId.codeUnits.fold(0, (a, b) => a + b);
+    return emojis[code % emojis.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isTop3 = rank <= 3;
+    final rankEmojis = ['🥇', '🥈', '🥉'];
+    final rankLabel = isTop3 ? rankEmojis[rank - 1] : '#$rank';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isCurrentUser
+            ? AppColors.primary.withOpacity(0.08)
+            : theme.cardColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isCurrentUser
+              ? AppColors.primary.withOpacity(0.4)
+              : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Posición
+          SizedBox(
+            width: 36,
+            child: Text(
+              rankLabel,
+              style: TextStyle(
+                fontSize: isTop3 ? 20 : 14,
+                fontWeight: FontWeight.w700,
+                color: isTop3 ? null : AppColors.textSecondaryDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const Gap(10),
+          // Avatar emoji
+          Text(_avatar(entry.userId), style: const TextStyle(fontSize: 24)),
+          const Gap(10),
+          // Nombre
+          Expanded(
+            child: Text(
+              isCurrentUser ? 'Tú' : 'Usuario anónimo',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: isCurrentUser ? FontWeight.w700 : FontWeight.w400,
+                color: isCurrentUser ? AppColors.primary : null,
+              ),
+            ),
+          ),
+          // XP
+          Text(
+            '${entry.totalXP} XP',
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

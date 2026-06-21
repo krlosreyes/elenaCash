@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -10,15 +11,27 @@ import 'package:purchases_flutter/purchases_flutter.dart';
 
 import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
+import 'core/services/notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_mode_provider.dart';
 import 'firebase_options.dart';
 import 'shared/providers/firebase_providers.dart';
 
+// ── Background FCM handler (top-level, fuera de main) ────────────────
+// Debe registrarse antes de runApp.
+@pragma('vm:entry-point')
+Future<void> _backgroundMessageHandler(RemoteMessage message) =>
+    onFirebaseBackgroundMessage(message);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Registrar handler de mensajes en background/terminated
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_backgroundMessageHandler);
+  }
 
   // ── RevenueCat — solo móvil (no funciona en Flutter Web) ─────────
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
@@ -27,6 +40,11 @@ void main() async {
         : AppConstants.revenueCatApiKeyIOS;
     await Purchases.configure(PurchasesConfiguration(apiKey));
     await Purchases.setLogLevel(LogLevel.error);
+  }
+
+  // ── FCM + Notificaciones locales ──────────────────────────────────
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    await NotificationService.instance.initialize();
   }
 
   // Crashlytics: solo activo en release y cuando Firebase está configurado

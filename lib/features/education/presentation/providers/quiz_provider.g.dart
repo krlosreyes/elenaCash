@@ -9,6 +9,44 @@ part of 'quiz_provider.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 
+@ProviderFor(leaderboard)
+const leaderboardProvider = LeaderboardProvider._();
+
+final class LeaderboardProvider extends $FunctionalProvider<
+        AsyncValue<List<LeaderboardEntry>>,
+        List<LeaderboardEntry>,
+        Stream<List<LeaderboardEntry>>>
+    with
+        $FutureModifier<List<LeaderboardEntry>>,
+        $StreamProvider<List<LeaderboardEntry>> {
+  const LeaderboardProvider._()
+      : super(
+          from: null,
+          argument: null,
+          retry: null,
+          name: r'leaderboardProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$leaderboardHash();
+
+  @$internal
+  @override
+  $StreamProviderElement<List<LeaderboardEntry>> $createElement(
+          $ProviderPointer pointer) =>
+      $StreamProviderElement(pointer);
+
+  @override
+  Stream<List<LeaderboardEntry>> create(Ref ref) {
+    return leaderboard(ref);
+  }
+}
+
+String _$leaderboardHash() => r'd1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0';
+
 @ProviderFor(availableQuizzes)
 const availableQuizzesProvider = AvailableQuizzesProvider._();
 
