@@ -25,7 +25,9 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   // Step 1 – Rich Life (selección múltiple estructurada)
   final List<String> _richLifeCategories = [];
   // Step 2 – Ingresos
-  double _netMonthlyIncome = 0;
+  double _netMonthlyIncome = 0;   // ingreso laboral neto
+  double _additionalIncome = 0;   // inversiones, arriendos, pasivos
+  double get _totalIncome => _netMonthlyIncome + _additionalIncome;
   Map<String, dynamic> _incomeBreakdown = {};
   String _currency = 'COP';
   // Step 3 – Gastos fijos
@@ -64,7 +66,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
 
     try {
       final firestore = ref.read(firebaseFirestoreProvider);
-      final income = _netMonthlyIncome;
+      final income = _totalIncome;
 
       // Usar batch para escribir todo atómicamente
       final batch = firestore.batch();
@@ -105,9 +107,18 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
             .map((id) => _RichLifeOption.labelFor(id))
             .join(', '),
         'incomeBreakdown': _incomeBreakdown,
+        'additionalIncome': _additionalIncome,
         'expenseBreakdown': _expenseAmounts,
         'totalMonthlyExpenses': totalExpenses,
         'totalMonthlyDebtPayments': totalDebtPayments,
+        'financialDiagnosis': _totalIncome > 0
+            ? _computeDiagnosis(((totalExpenses + totalDebtPayments) /
+                        _totalIncome *
+                        100)
+                    .clamp(0, 100)
+                    .toDouble())
+                .name
+            : 'unknown',
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -167,6 +178,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
                     currency: _currency,
                     onCurrencyChanged: (v) => setState(() => _currency = v),
                     onIncomeChanged: (v) => setState(() => _netMonthlyIncome = v),
+                    onAdditionalIncomeChanged: (v) => setState(() => _additionalIncome = v),
                     onBreakdownChanged: (v) => setState(() => _incomeBreakdown = v),
                     onNext: _next,
                   ),
@@ -180,12 +192,16 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
                     onDebtsChanged: (v) => setState(() => _debtEntries = v),
                     onNext: _next,
                   ),
-                  _BucketPage(
-                    fixedPct: _fixedPct,
-                    savPct: _savPct,
-                    invPct: _invPct,
-                    freePct: _freePct,
-                    onChanged: (f, s, i, g) => setState(() {
+                  _DiagnosisPage(
+                    totalIncome: _totalIncome,
+                    laborIncome: _netMonthlyIncome,
+                    additionalIncome: _additionalIncome,
+                    totalExpenses: _expenseAmounts.values.fold(0.0, (a, b) => a + b),
+                    totalDebtPayments: _debtEntries.fold(
+                        0.0, (a, d) => a + (d['monthlyPayment'] as num? ?? 0).toDouble()),
+                    richLifeCategories: _richLifeCategories,
+                    currency: _currency,
+                    onBucketsConfirmed: (f, s, i, g) => setState(() {
                       _fixedPct = f; _savPct = s; _invPct = i; _freePct = g;
                     }),
                     loading: _loading,
@@ -546,6 +562,7 @@ class _IncomePage extends StatefulWidget {
   final String currency;
   final ValueChanged<String> onCurrencyChanged;
   final ValueChanged<double> onIncomeChanged;
+  final ValueChanged<double> onAdditionalIncomeChanged;
   final ValueChanged<Map<String, dynamic>> onBreakdownChanged;
   final VoidCallback onNext;
 
@@ -553,6 +570,7 @@ class _IncomePage extends StatefulWidget {
     required this.currency,
     required this.onCurrencyChanged,
     required this.onIncomeChanged,
+    required this.onAdditionalIncomeChanged,
     required this.onBreakdownChanged,
     required this.onNext,
   });
@@ -582,6 +600,13 @@ class _IncomePageState extends State<_IncomePage> {
   final _empNetCtrl = TextEditingController();
   final _freNetCtrl = TextEditingController();
 
+  // Ingresos pasivos / adicionales
+  bool _hasAdditionalIncome = false;
+  final _investCtrl = TextEditingController();
+  final _rentalIncCtrl = TextEditingController();
+  final _businessDistCtrl = TextEditingController();
+  final _otherPassiveCtrl = TextEditingController();
+
   @override
   void dispose() {
     _salaryCtrl.dispose();
@@ -592,7 +617,19 @@ class _IncomePageState extends State<_IncomePage> {
     _socialSecCtrl.dispose();
     _empNetCtrl.dispose();
     _freNetCtrl.dispose();
+    _investCtrl.dispose();
+    _rentalIncCtrl.dispose();
+    _businessDistCtrl.dispose();
+    _otherPassiveCtrl.dispose();
     super.dispose();
+  }
+
+  double get _additionalIncome {
+    if (!_hasAdditionalIncome) return 0;
+    return _parse(_investCtrl.text) +
+        _parse(_rentalIncCtrl.text) +
+        _parse(_businessDistCtrl.text) +
+        _parse(_otherPassiveCtrl.text);
   }
 
   double _parse(String v) =>
@@ -620,6 +657,17 @@ class _IncomePageState extends State<_IncomePage> {
   }
 
   Map<String, dynamic> get _breakdown {
+    final addInc = <String, dynamic>{
+      if (_hasAdditionalIncome && _parse(_investCtrl.text) > 0)
+        'inversiones': _parse(_investCtrl.text),
+      if (_hasAdditionalIncome && _parse(_rentalIncCtrl.text) > 0)
+        'arriendos': _parse(_rentalIncCtrl.text),
+      if (_hasAdditionalIncome && _parse(_businessDistCtrl.text) > 0)
+        'distribuciones': _parse(_businessDistCtrl.text),
+      if (_hasAdditionalIncome && _parse(_otherPassiveCtrl.text) > 0)
+        'otrosPasivos': _parse(_otherPassiveCtrl.text),
+      if (_hasAdditionalIncome) 'totalAdicional': _additionalIncome,
+    };
     switch (_type) {
       case _IncomeType.employee:
         return {
@@ -628,7 +676,8 @@ class _IncomePageState extends State<_IncomePage> {
           if (_hasCommissions) 'comisionesPrestacionales': _parse(_prestComCtrl.text),
           if (_hasCommissions) 'comisionesNoPrestacionales': _parse(_nonPrestComCtrl.text),
           'deduccionesEstimadas': (_parse(_salaryCtrl.text) + (_hasCommissions ? _parse(_prestComCtrl.text) : 0)) * 0.08,
-          'netoEstimado': _computedNet,
+          'netoLaboral': _computedNet,
+          ...addInc,
         };
       case _IncomeType.freelance:
         return {
@@ -637,14 +686,16 @@ class _IncomePageState extends State<_IncomePage> {
           'ingresosBrutos': _parse(_grossCtrl.text),
           'gastosOperacionales': _parse(_expensesCtrl.text),
           if (_hasSocialSecurity) 'seguridadSocial': _parse(_socialSecCtrl.text),
-          'netoEstimado': _computedNet,
+          'netoLaboral': _computedNet,
+          ...addInc,
         };
       case _IncomeType.mixed:
         return {
           'type': 'mixed',
           'netoEmpleado': _parse(_empNetCtrl.text),
           'netoIndependiente': _parse(_freNetCtrl.text),
-          'netoEstimado': _computedNet,
+          'netoLaboral': _computedNet,
+          ...addInc,
         };
       default:
         return {};
@@ -673,6 +724,7 @@ class _IncomePageState extends State<_IncomePage> {
 
   void _handleNext() {
     widget.onIncomeChanged(_computedNet);
+    widget.onAdditionalIncomeChanged(_additionalIncome);
     widget.onBreakdownChanged(_breakdown);
     widget.onNext();
   }
@@ -873,6 +925,17 @@ class _IncomePageState extends State<_IncomePage> {
                   note: 'La retención en la fuente varía según tu nivel salarial y no está incluida.',
                 ),
               const Gap(24),
+              _AdditionalIncomeSection(
+                currency: widget.currency,
+                expanded: _hasAdditionalIncome,
+                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
+                investCtrl: _investCtrl,
+                rentalCtrl: _rentalIncCtrl,
+                businessCtrl: _businessDistCtrl,
+                otherCtrl: _otherPassiveCtrl,
+                onChanged: () => setState(() {}),
+              ),
+              const Gap(24),
             ],
           ),
         ),
@@ -1008,6 +1071,17 @@ class _IncomePageState extends State<_IncomePage> {
                   note: 'No incluye retención en la fuente (varía según tipo de servicio y cliente).',
                 ),
               const Gap(24),
+              _AdditionalIncomeSection(
+                currency: widget.currency,
+                expanded: _hasAdditionalIncome,
+                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
+                investCtrl: _investCtrl,
+                rentalCtrl: _rentalIncCtrl,
+                businessCtrl: _businessDistCtrl,
+                otherCtrl: _otherPassiveCtrl,
+                onChanged: () => setState(() {}),
+              ),
+              const Gap(24),
             ],
           ),
         ),
@@ -1079,6 +1153,17 @@ class _IncomePageState extends State<_IncomePage> {
                   net: net,
                   note: null,
                 ),
+              const Gap(24),
+              _AdditionalIncomeSection(
+                currency: widget.currency,
+                expanded: _hasAdditionalIncome,
+                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
+                investCtrl: _investCtrl,
+                rentalCtrl: _rentalIncCtrl,
+                businessCtrl: _businessDistCtrl,
+                otherCtrl: _otherPassiveCtrl,
+                onChanged: () => setState(() {}),
+              ),
               const Gap(24),
             ],
           ),
@@ -1353,6 +1438,191 @@ class _NextButton extends StatelessWidget {
           child: const Text('Siguiente →'),
         ),
       ),
+    );
+  }
+}
+
+// ── Additional income section (shared across income form variants) ──
+
+class _AdditionalIncomeSection extends StatelessWidget {
+  final String currency;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final TextEditingController investCtrl;
+  final TextEditingController rentalCtrl;
+  final TextEditingController businessCtrl;
+  final TextEditingController otherCtrl;
+  final VoidCallback onChanged;
+
+  const _AdditionalIncomeSection({
+    required this.currency,
+    required this.expanded,
+    required this.onToggle,
+    required this.investCtrl,
+    required this.rentalCtrl,
+    required this.businessCtrl,
+    required this.otherCtrl,
+    required this.onChanged,
+  });
+
+  String get _prefix => currency == 'COP' ? '\$ ' : 'USD ';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: onToggle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: expanded ? AppColors.primarySurface : theme.cardColor,
+              borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
+              border: Border.all(
+                color: expanded ? AppColors.primary : theme.dividerColor,
+                width: expanded ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Text('📈', style: const TextStyle(fontSize: 18)),
+                const Gap(10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('¿Tienes ingresos adicionales o pasivos?',
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      Text('Inversiones, arriendos, distribuciones...',
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: AppColors.textSecondaryDark)),
+                    ],
+                  ),
+                ),
+                Icon(
+                  expanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  color: AppColors.primary,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (expanded) ...[
+          const Gap(12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.primarySurface.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
+              border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+            ),
+            child: Column(
+              children: [
+                _PassiveRow(
+                  emoji: '📈',
+                  label: 'Inversiones',
+                  hint: 'Dividendos, CDTs, fondos, cripto...',
+                  prefix: _prefix,
+                  controller: investCtrl,
+                  onChanged: (_) => onChanged(),
+                ),
+                const Gap(10),
+                _PassiveRow(
+                  emoji: '🏘️',
+                  label: 'Arriendos',
+                  hint: 'Ingreso neto de propiedades en arriendo',
+                  prefix: _prefix,
+                  controller: rentalCtrl,
+                  onChanged: (_) => onChanged(),
+                ),
+                const Gap(10),
+                _PassiveRow(
+                  emoji: '💼',
+                  label: 'Distribuciones de negocio',
+                  hint: 'Utilidades de empresa, socios...',
+                  prefix: _prefix,
+                  controller: businessCtrl,
+                  onChanged: (_) => onChanged(),
+                ),
+                const Gap(10),
+                _PassiveRow(
+                  emoji: '💰',
+                  label: 'Otros ingresos',
+                  hint: 'Regalías, pensión, ayudas...',
+                  prefix: _prefix,
+                  controller: otherCtrl,
+                  onChanged: (_) => onChanged(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PassiveRow extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final String hint;
+  final String prefix;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _PassiveRow({
+    required this.emoji,
+    required this.label,
+    required this.hint,
+    required this.prefix,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 16)),
+        const Gap(8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              Text(hint,
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: AppColors.textSecondaryDark)),
+            ],
+          ),
+        ),
+        const Gap(8),
+        SizedBox(
+          width: 110,
+          height: 38,
+          child: TextField(
+            controller: controller,
+            keyboardType: TextInputType.number,
+            onChanged: onChanged,
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              prefixText: prefix,
+              hintText: '0',
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              isDense: true,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2087,6 +2357,524 @@ class _DebtsPageState extends State<_DebtsPage> {
     );
   }
 }
+
+// ── Financial diagnosis engine ─────────────────────────────────────
+
+enum _FinancialDiagnosis { critical, overextended, tight, balanced, thriving }
+
+extension _DiagnosisX on _FinancialDiagnosis {
+  String get emoji => switch (this) {
+        _FinancialDiagnosis.critical => '😰',
+        _FinancialDiagnosis.overextended => '⚠️',
+        _FinancialDiagnosis.tight => '🔧',
+        _FinancialDiagnosis.balanced => '✅',
+        _FinancialDiagnosis.thriving => '🚀',
+      };
+
+  String get label => switch (this) {
+        _FinancialDiagnosis.critical => 'Zona crítica',
+        _FinancialDiagnosis.overextended => 'Sobre-extendido',
+        _FinancialDiagnosis.tight => 'Ajustado',
+        _FinancialDiagnosis.balanced => 'En equilibrio',
+        _FinancialDiagnosis.thriving => 'Listo para crecer',
+      };
+
+  String get description => switch (this) {
+        _FinancialDiagnosis.critical =>
+          'Tus compromisos fijos consumen casi todo tu ingreso. El plan enfoca todo en recuperar margen y eliminar deudas.',
+        _FinancialDiagnosis.overextended =>
+          'Estás comprometiendo demasiado. El plan te da una ruta para recuperar control y respirar.',
+        _FinancialDiagnosis.tight =>
+          'Hay poco margen, pero es manejable. Cada peso cuenta — el plan te ayuda a optimizarlos.',
+        _FinancialDiagnosis.balanced =>
+          'Buena base financiera. El plan la consolida y empieza a trabajar para ti en automático.',
+        _FinancialDiagnosis.thriving =>
+          'Sólida posición. El plan maximiza tu crecimiento patrimonial y tu Rich Life.',
+      };
+
+  Color get color => switch (this) {
+        _FinancialDiagnosis.critical => AppColors.error,
+        _FinancialDiagnosis.overextended => const Color(0xFFFF8C00),
+        _FinancialDiagnosis.tight => const Color(0xFFFFBF00),
+        _FinancialDiagnosis.balanced => const Color(0xFF00B894),
+        _FinancialDiagnosis.thriving => AppColors.primary,
+      };
+}
+
+_FinancialDiagnosis _computeDiagnosis(double commitPct) {
+  if (commitPct >= 85) return _FinancialDiagnosis.critical;
+  if (commitPct >= 70) return _FinancialDiagnosis.overextended;
+  if (commitPct >= 55) return _FinancialDiagnosis.tight;
+  if (commitPct >= 35) return _FinancialDiagnosis.balanced;
+  return _FinancialDiagnosis.thriving;
+}
+
+/// Returns recommended (fixedPct, savingsPct, investmentsPct, guiltFreePct).
+(double, double, double, double) _recommendBuckets(
+    double commitPct, List<String> richLife) {
+  double fixed, savings, investments, guiltFree;
+
+  if (commitPct >= 85) {
+    fixed = commitPct.clamp(0, 90);
+    savings = 5;
+    investments = 0;
+    guiltFree = (100 - fixed - savings).clamp(0, 15);
+  } else if (commitPct >= 70) {
+    fixed = commitPct;
+    savings = 5;
+    investments = 2;
+    guiltFree = (100 - fixed - savings - investments).clamp(0, 20);
+  } else if (commitPct >= 55) {
+    fixed = commitPct;
+    savings = 7.5;
+    investments = 5;
+    guiltFree = (100 - fixed - savings - investments).clamp(0, 30);
+  } else if (commitPct >= 35) {
+    fixed = 55;
+    savings = 10;
+    investments = 10;
+    guiltFree = 25;
+  } else {
+    fixed = 40;
+    savings = 15;
+    investments = 20;
+    guiltFree = 25;
+  }
+
+  // Rich Life modifiers (only when there's enough margin)
+  final hasMargin = commitPct < 65;
+  if (hasMargin) {
+    if (richLife.any((c) => ['independencia', 'negocio'].contains(c))) {
+      investments = (investments + 3).clamp(0, 25);
+      guiltFree = (guiltFree - 3).clamp(5, 40);
+    }
+    if (richLife.any((c) => ['viajes', 'experiencias', 'lujo_cotidiano'].contains(c))) {
+      guiltFree = (guiltFree + 3).clamp(5, 40);
+      savings = (savings - 1.5).clamp(5, 20);
+      investments = (investments - 1.5).clamp(0, 25);
+    }
+    if (richLife.contains('educacion')) {
+      savings = (savings + 1).clamp(5, 20);
+      guiltFree = (guiltFree - 1).clamp(5, 40);
+    }
+  }
+
+  // Normalize to 100
+  final total = fixed + savings + investments + guiltFree;
+  if (total > 100) {
+    final excess = total - 100;
+    guiltFree = (guiltFree - excess).clamp(0, 40);
+  }
+
+  return (fixed, savings, investments, guiltFree);
+}
+
+// ── Diagnosis page ─────────────────────────────────────────────────
+
+class _DiagnosisPage extends StatefulWidget {
+  final double totalIncome;
+  final double laborIncome;
+  final double additionalIncome;
+  final double totalExpenses;
+  final double totalDebtPayments;
+  final List<String> richLifeCategories;
+  final String currency;
+  final void Function(double, double, double, double) onBucketsConfirmed;
+  final bool loading;
+  final VoidCallback onFinish;
+
+  const _DiagnosisPage({
+    required this.totalIncome,
+    required this.laborIncome,
+    required this.additionalIncome,
+    required this.totalExpenses,
+    required this.totalDebtPayments,
+    required this.richLifeCategories,
+    required this.currency,
+    required this.onBucketsConfirmed,
+    required this.loading,
+    required this.onFinish,
+  });
+
+  @override
+  State<_DiagnosisPage> createState() => _DiagnosisPageState();
+}
+
+class _DiagnosisPageState extends State<_DiagnosisPage> {
+  late double _fixedPct;
+  late double _savPct;
+  late double _invPct;
+  late double _freePct;
+  bool _showAdjust = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void didUpdateWidget(_DiagnosisPage old) {
+    super.didUpdateWidget(old);
+    _init();
+  }
+
+  void _init() {
+    final commitPct = widget.totalIncome > 0
+        ? ((widget.totalExpenses + widget.totalDebtPayments) /
+                widget.totalIncome *
+                100)
+            .clamp(0, 100)
+        : 55.0;
+    final rec = _recommendBuckets(commitPct, widget.richLifeCategories);
+    _fixedPct = rec.$1;
+    _savPct = rec.$2;
+    _invPct = rec.$3;
+    _freePct = rec.$4;
+  }
+
+  String _fmt(double v) {
+    if (widget.currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  String _pct(double v) => '${v.toStringAsFixed(0)}%';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final income = widget.totalIncome;
+    final expenses = widget.totalExpenses;
+    final debt = widget.totalDebtPayments;
+    final committed = expenses + debt;
+    final available = income - committed;
+    final commitPct = income > 0 ? (committed / income * 100).clamp(0, 100) : 0.0;
+    final diagnosis = _computeDiagnosis(commitPct.toDouble());
+    final total = _fixedPct + _savPct + _invPct + _freePct;
+
+    return ListView(
+      padding: const EdgeInsets.all(AppConstants.defaultPadding),
+      children: [
+        const Gap(8),
+
+        // ── Diagnosis card ──
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: diagnosis.color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: diagnosis.color.withOpacity(0.4), width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(diagnosis.emoji,
+                      style: const TextStyle(fontSize: 32)),
+                  const Gap(12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Tu diagnóstico financiero',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                                color: diagnosis.color,
+                                fontWeight: FontWeight.w600)),
+                        Text(diagnosis.label,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                                color: diagnosis.color,
+                                fontWeight: FontWeight.w800)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const Gap(10),
+              Text(diagnosis.description,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.textTheme.bodySmall?.color?.withOpacity(0.85))),
+            ],
+          ),
+        ).animate().fadeIn().slideY(begin: 0.05),
+
+        const Gap(20),
+
+        // ── Financial snapshot ──
+        Text('📊 Tu panorama mensual',
+            style: theme.textTheme.titleSmall
+                ?.copyWith(fontWeight: FontWeight.w700)),
+        const Gap(10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: theme.dividerColor),
+          ),
+          child: Column(
+            children: [
+              if (income > 0) ...[
+                _SnapshotRow('Ingreso laboral neto', widget.laborIncome,
+                    color: AppColors.primary, isIncome: true, fmt: _fmt),
+                if (widget.additionalIncome > 0)
+                  _SnapshotRow('+ Ingresos pasivos / adicionales',
+                      widget.additionalIncome,
+                      color: AppColors.primary, isIncome: true, fmt: _fmt),
+                const Divider(height: 14),
+                if (expenses > 0)
+                  _SnapshotRow('- Gastos fijos', expenses,
+                      color: AppColors.error, isIncome: false, fmt: _fmt),
+                if (debt > 0)
+                  _SnapshotRow('- Cuotas de deuda', debt,
+                      color: AppColors.error, isIncome: false, fmt: _fmt),
+                const Divider(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                        child: Text('Disponible',
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700))),
+                    Text(
+                      available >= 0
+                          ? _fmt(available)
+                          : '-${_fmt(available.abs())}',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: available >= 0
+                            ? AppColors.primary
+                            : AppColors.error,
+                      ),
+                    ),
+                    const Gap(6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: (available >= 0
+                                ? AppColors.primary
+                                : AppColors.error)
+                            .withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${_pct(100 - commitPct.clamp(0, 100))}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: available >= 0
+                              ? AppColors.primary
+                              : AppColors.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else
+                Text(
+                  'Ingresa tus ingresos en el paso anterior para ver tu diagnóstico.',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: AppColors.textSecondaryDark),
+                ),
+            ],
+          ),
+        ).animate(delay: 100.ms).fadeIn(),
+
+        const Gap(20),
+
+        // ── Recommended buckets ──
+        Row(
+          children: [
+            Expanded(
+              child: Text('⚡ Tu plan configurado',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+            TextButton(
+              onPressed: () => setState(() => _showAdjust = !_showAdjust),
+              child: Text(_showAdjust ? 'Ocultar' : 'Personalizar'),
+            ),
+          ],
+        ),
+        const Gap(8),
+        _BucketBar(
+            label: '🏠 Gastos Fijos',
+            pct: _fixedPct,
+            color: AppColors.bucketFixed,
+            fmt: _pct),
+        const Gap(6),
+        _BucketBar(
+            label: '🏦 Ahorro',
+            pct: _savPct,
+            color: AppColors.bucketSavings,
+            fmt: _pct),
+        const Gap(6),
+        _BucketBar(
+            label: '📈 Inversiones',
+            pct: _invPct,
+            color: AppColors.bucketInvestments,
+            fmt: _pct),
+        const Gap(6),
+        _BucketBar(
+            label: '🎉 Gasto Libre',
+            pct: _freePct,
+            color: AppColors.bucketFree,
+            fmt: _pct),
+        const Gap(4),
+        Text(
+          'Total: ${total.toStringAsFixed(0)}% ${total > 100 ? '⚠️ Excede 100%' : ''}',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: total > 100 ? AppColors.error : AppColors.textSecondaryDark,
+          ),
+        ),
+
+        // ── Adjustable sliders ──
+        if (_showAdjust) ...[
+          const Gap(16),
+          Text('Personalizar distribución:',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+          const Gap(8),
+          _BucketSlider(
+              label: '🏠 Gastos Fijos',
+              value: _fixedPct,
+              color: AppColors.bucketFixed,
+              onChanged: (v) => setState(() => _fixedPct = v)),
+          _BucketSlider(
+              label: '🏦 Ahorro',
+              value: _savPct,
+              color: AppColors.bucketSavings,
+              onChanged: (v) => setState(() => _savPct = v)),
+          _BucketSlider(
+              label: '📈 Inversiones',
+              value: _invPct,
+              color: AppColors.bucketInvestments,
+              onChanged: (v) => setState(() => _invPct = v)),
+          _BucketSlider(
+              label: '🎉 Gasto Libre',
+              value: _freePct,
+              color: AppColors.bucketFree,
+              onChanged: (v) => setState(() => _freePct = v)),
+        ],
+
+        const Gap(24),
+
+        // ── CTA ──
+        SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: ElevatedButton(
+            onPressed: (total <= 100 && !widget.loading)
+                ? () {
+                    widget.onBucketsConfirmed(
+                        _fixedPct, _savPct, _invPct, _freePct);
+                    widget.onFinish();
+                  }
+                : null,
+            child: widget.loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.black),
+                  )
+                : const Text('¡Activar mi sistema financiero! 🚀',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ),
+        const Gap(24),
+      ],
+    );
+  }
+}
+
+class _SnapshotRow extends StatelessWidget {
+  final String label;
+  final double amount;
+  final Color color;
+  final bool isIncome;
+  final String Function(double) fmt;
+
+  const _SnapshotRow(this.label, this.amount,
+      {required this.color, required this.isIncome, required this.fmt});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark)),
+          ),
+          Text(
+            fmt(amount),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BucketBar extends StatelessWidget {
+  final String label;
+  final double pct;
+  final Color color;
+  final String Function(double) fmt;
+
+  const _BucketBar(
+      {required this.label,
+      required this.pct,
+      required this.color,
+      required this.fmt});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        SizedBox(
+          width: 130,
+          child: Text(label,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (pct / 100).clamp(0, 1),
+              backgroundColor: color.withOpacity(0.15),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 10,
+            ),
+          ),
+        ),
+        const Gap(8),
+        SizedBox(
+          width: 36,
+          child: Text(fmt(pct),
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700, color: color)),
+        ),
+      ],
+    );
+  }
+}
+
+// ── (Legacy bucket page kept below for reference but not used) ─────
 
 class _BucketPage extends StatelessWidget {
   final double fixedPct, savPct, invPct, freePct;
