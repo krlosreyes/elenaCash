@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -599,12 +601,8 @@ class _IncomePageState extends State<_IncomePage> {
   final _empNetCtrl = TextEditingController();
   final _freNetCtrl = TextEditingController();
 
-  // Ingresos pasivos / adicionales
-  bool _hasAdditionalIncome = false;
-  final _investCtrl = TextEditingController();
-  final _rentalIncCtrl = TextEditingController();
-  final _businessDistCtrl = TextEditingController();
-  final _otherPassiveCtrl = TextEditingController();
+  // Ingresos pasivos / adicionales — gestionados por _AdditionalIncomeSection
+  double _additionalIncome = 0;
 
   @override
   void dispose() {
@@ -616,19 +614,7 @@ class _IncomePageState extends State<_IncomePage> {
     _socialSecCtrl.dispose();
     _empNetCtrl.dispose();
     _freNetCtrl.dispose();
-    _investCtrl.dispose();
-    _rentalIncCtrl.dispose();
-    _businessDistCtrl.dispose();
-    _otherPassiveCtrl.dispose();
     super.dispose();
-  }
-
-  double get _additionalIncome {
-    if (!_hasAdditionalIncome) return 0;
-    return _parse(_investCtrl.text) +
-        _parse(_rentalIncCtrl.text) +
-        _parse(_businessDistCtrl.text) +
-        _parse(_otherPassiveCtrl.text);
   }
 
   double _parse(String v) =>
@@ -657,15 +643,7 @@ class _IncomePageState extends State<_IncomePage> {
 
   Map<String, dynamic> get _breakdown {
     final addInc = <String, dynamic>{
-      if (_hasAdditionalIncome && _parse(_investCtrl.text) > 0)
-        'inversiones': _parse(_investCtrl.text),
-      if (_hasAdditionalIncome && _parse(_rentalIncCtrl.text) > 0)
-        'arriendos': _parse(_rentalIncCtrl.text),
-      if (_hasAdditionalIncome && _parse(_businessDistCtrl.text) > 0)
-        'distribuciones': _parse(_businessDistCtrl.text),
-      if (_hasAdditionalIncome && _parse(_otherPassiveCtrl.text) > 0)
-        'otrosPasivos': _parse(_otherPassiveCtrl.text),
-      if (_hasAdditionalIncome) 'totalAdicional': _additionalIncome,
+      if (_additionalIncome > 0) 'totalAdicional': _additionalIncome,
     };
     switch (_type) {
       case _IncomeType.employee:
@@ -926,13 +904,7 @@ class _IncomePageState extends State<_IncomePage> {
               const Gap(24),
               _AdditionalIncomeSection(
                 currency: widget.currency,
-                expanded: _hasAdditionalIncome,
-                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
-                investCtrl: _investCtrl,
-                rentalCtrl: _rentalIncCtrl,
-                businessCtrl: _businessDistCtrl,
-                otherCtrl: _otherPassiveCtrl,
-                onChanged: () => setState(() {}),
+                onTotalChanged: (v) => setState(() => _additionalIncome = v),
               ),
               const Gap(24),
             ],
@@ -1072,13 +1044,7 @@ class _IncomePageState extends State<_IncomePage> {
               const Gap(24),
               _AdditionalIncomeSection(
                 currency: widget.currency,
-                expanded: _hasAdditionalIncome,
-                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
-                investCtrl: _investCtrl,
-                rentalCtrl: _rentalIncCtrl,
-                businessCtrl: _businessDistCtrl,
-                otherCtrl: _otherPassiveCtrl,
-                onChanged: () => setState(() {}),
+                onTotalChanged: (v) => setState(() => _additionalIncome = v),
               ),
               const Gap(24),
             ],
@@ -1155,13 +1121,7 @@ class _IncomePageState extends State<_IncomePage> {
               const Gap(24),
               _AdditionalIncomeSection(
                 currency: widget.currency,
-                expanded: _hasAdditionalIncome,
-                onToggle: () => setState(() => _hasAdditionalIncome = !_hasAdditionalIncome),
-                investCtrl: _investCtrl,
-                rentalCtrl: _rentalIncCtrl,
-                businessCtrl: _businessDistCtrl,
-                otherCtrl: _otherPassiveCtrl,
-                onChanged: () => setState(() {}),
+                onTotalChanged: (v) => setState(() => _additionalIncome = v),
               ),
               const Gap(24),
             ],
@@ -1441,68 +1401,151 @@ class _NextButton extends StatelessWidget {
   }
 }
 
-// ── Additional income section (shared across income form variants) ──
+// ── Additional income section — with investment calculators ────────
+//
+// KEY INSIGHT: investments generate INCOME, not a monthly cashflow
+// equal to the principal. A CDT of $5M at 12% EA generates ~$47K/month,
+// not $5M/month. This section separates capital from yield.
 
-class _AdditionalIncomeSection extends StatelessWidget {
+class _AdditionalIncomeSection extends StatefulWidget {
   final String currency;
-  final bool expanded;
-  final VoidCallback onToggle;
-  final TextEditingController investCtrl;
-  final TextEditingController rentalCtrl;
-  final TextEditingController businessCtrl;
-  final TextEditingController otherCtrl;
-  final VoidCallback onChanged;
+  final ValueChanged<double> onTotalChanged;
 
   const _AdditionalIncomeSection({
     required this.currency,
-    required this.expanded,
-    required this.onToggle,
-    required this.investCtrl,
-    required this.rentalCtrl,
-    required this.businessCtrl,
-    required this.otherCtrl,
-    required this.onChanged,
+    required this.onTotalChanged,
   });
 
-  String get _prefix => currency == 'COP' ? '\$ ' : 'USD ';
+  @override
+  State<_AdditionalIncomeSection> createState() =>
+      _AdditionalIncomeSectionState();
+}
+
+class _AdditionalIncomeSectionState extends State<_AdditionalIncomeSection> {
+  bool _expanded = false;
+
+  // CDT / Depósito a plazo
+  bool _hasCdt = false;
+  final _cdtCapCtrl = TextEditingController();
+  final _cdtRateCtrl = TextEditingController();
+
+  // Fondos / ETFs / Acciones
+  bool _hasFunds = false;
+  final _fundsCapCtrl = TextEditingController();
+  final _fundsRateCtrl = TextEditingController();
+
+  // Arriendos (direct monthly net income)
+  bool _hasRental = false;
+  final _rentalCtrl = TextEditingController();
+
+  // Distribuciones de negocio (direct monthly average)
+  bool _hasBusiness = false;
+  final _businessCtrl = TextEditingController();
+
+  // Otros
+  bool _hasOther = false;
+  final _otherCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _cdtCapCtrl.dispose();
+    _cdtRateCtrl.dispose();
+    _fundsCapCtrl.dispose();
+    _fundsRateCtrl.dispose();
+    _rentalCtrl.dispose();
+    _businessCtrl.dispose();
+    _otherCtrl.dispose();
+    super.dispose();
+  }
+
+  double _parse(String v) =>
+      double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+  /// Rendimiento mensual de un instrumento dado capital y tasa EA.
+  /// Usa la fórmula de tasa efectiva mensual: (1+EA)^(1/12) - 1
+  double _monthlyYield(double capital, double annualRatePct) {
+    if (capital <= 0 || annualRatePct <= 0) return 0;
+    final ea = annualRatePct / 100;
+    final em = pow(1 + ea, 1 / 12) - 1; // tasa efectiva mensual
+    return capital * em;
+  }
+
+  double get _cdtMonthly =>
+      _hasCdt ? _monthlyYield(_parse(_cdtCapCtrl.text), _parse(_cdtRateCtrl.text)) : 0;
+
+  double get _fundsMonthly =>
+      _hasFunds ? _monthlyYield(_parse(_fundsCapCtrl.text), _parse(_fundsRateCtrl.text)) : 0;
+
+  double get _totalMonthly =>
+      _cdtMonthly +
+      _fundsMonthly +
+      (_hasRental ? _parse(_rentalCtrl.text) : 0) +
+      (_hasBusiness ? _parse(_businessCtrl.text) : 0) +
+      (_hasOther ? _parse(_otherCtrl.text) : 0);
+
+  void _notify() {
+    widget.onTotalChanged(_totalMonthly);
+    setState(() {});
+  }
+
+  String _fmt(double v) {
+    if (widget.currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  String get _prefix => widget.currency == 'COP' ? '\$ ' : 'USD ';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final total = _totalMonthly;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
-          onTap: onToggle,
+          onTap: () => setState(() => _expanded = !_expanded),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: expanded ? AppColors.primarySurface : theme.cardColor,
+              color: _expanded ? AppColors.primarySurface : theme.cardColor,
               borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
               border: Border.all(
-                color: expanded ? AppColors.primary : theme.dividerColor,
-                width: expanded ? 1.5 : 1,
+                color: _expanded ? AppColors.primary : theme.dividerColor,
+                width: _expanded ? 1.5 : 1,
               ),
             ),
             child: Row(
               children: [
-                Text('📈', style: const TextStyle(fontSize: 18)),
+                const Text('📈', style: TextStyle(fontSize: 18)),
                 const Gap(10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('¿Tienes ingresos adicionales o pasivos?',
+                      Text('¿Tienes ingresos pasivos o inversiones?',
                           style: theme.textTheme.bodyMedium
                               ?.copyWith(fontWeight: FontWeight.w600)),
-                      Text('Inversiones, arriendos, distribuciones...',
-                          style: theme.textTheme.labelSmall
-                              ?.copyWith(color: AppColors.textSecondaryDark)),
+                      Text(
+                        total > 0
+                            ? '${_fmt(total)}/mes'
+                            : 'CDTs, fondos, arriendos, negocios...',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: total > 0
+                              ? AppColors.primary
+                              : AppColors.textSecondaryDark,
+                          fontWeight:
+                              total > 0 ? FontWeight.w700 : FontWeight.w400,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 Icon(
-                  expanded
+                  _expanded
                       ? Icons.keyboard_arrow_up_rounded
                       : Icons.keyboard_arrow_down_rounded,
                   color: AppColors.primary,
@@ -1511,117 +1554,349 @@ class _AdditionalIncomeSection extends StatelessWidget {
             ),
           ),
         ),
-        if (expanded) ...[
-          const Gap(12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.primarySurface.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
-              border: Border.all(color: AppColors.primary.withOpacity(0.25)),
-            ),
-            child: Column(
-              children: [
-                _PassiveRow(
-                  emoji: '📈',
-                  label: 'Inversiones',
-                  hint: 'Dividendos, CDTs, fondos, cripto...',
-                  prefix: _prefix,
-                  controller: investCtrl,
-                  onChanged: (_) => onChanged(),
-                ),
-                const Gap(10),
-                _PassiveRow(
-                  emoji: '🏘️',
-                  label: 'Arriendos',
-                  hint: 'Ingreso neto de propiedades en arriendo',
-                  prefix: _prefix,
-                  controller: rentalCtrl,
-                  onChanged: (_) => onChanged(),
-                ),
-                const Gap(10),
-                _PassiveRow(
-                  emoji: '💼',
-                  label: 'Distribuciones de negocio',
-                  hint: 'Utilidades de empresa, socios...',
-                  prefix: _prefix,
-                  controller: businessCtrl,
-                  onChanged: (_) => onChanged(),
-                ),
-                const Gap(10),
-                _PassiveRow(
-                  emoji: '💰',
-                  label: 'Otros ingresos',
-                  hint: 'Regalías, pensión, ayudas...',
-                  prefix: _prefix,
-                  controller: otherCtrl,
-                  onChanged: (_) => onChanged(),
-                ),
-              ],
-            ),
+        if (_expanded) ...[
+          const Gap(10),
+          // CDT
+          _InvestmentTile(
+            emoji: '🏦',
+            title: 'CDT / Depósito a plazo',
+            subtitle: 'Calculamos el rendimiento mensual desde tu capital y tasa',
+            active: _hasCdt,
+            onToggle: (v) => setState(() { _hasCdt = v; _notify(); }),
+            child: _hasCdt
+                ? _YieldCalculator(
+                    prefix: _prefix,
+                    capitalCtrl: _cdtCapCtrl,
+                    rateCtrl: _cdtRateCtrl,
+                    monthly: _cdtMonthly,
+                    ratePlaceholder: 'Ej: 12',
+                    rateLabel: 'Tasa EA (%)',
+                    note: 'Rendimiento mensual = Capital × ((1 + Tasa EA)^(1/12) − 1). '
+                        'Si tu CDT paga al vencimiento, este es el equivalente mensual acumulado.',
+                    fmt: _fmt,
+                    onChanged: _notify,
+                  )
+                : null,
           ),
+          const Gap(8),
+          // Fondos / ETFs
+          _InvestmentTile(
+            emoji: '📊',
+            title: 'Fondos / ETFs / Acciones',
+            subtitle: 'Calcula el rendimiento mensual de tu capital invertido',
+            active: _hasFunds,
+            onToggle: (v) => setState(() { _hasFunds = v; _notify(); }),
+            child: _hasFunds
+                ? _YieldCalculator(
+                    prefix: _prefix,
+                    capitalCtrl: _fundsCapCtrl,
+                    rateCtrl: _fundsRateCtrl,
+                    monthly: _fundsMonthly,
+                    ratePlaceholder: 'Ej: 10',
+                    rateLabel: 'Rentabilidad anual esperada (%)',
+                    note: 'Usa la rentabilidad histórica del fondo o tu estimación. '
+                        'Las acciones y ETFs tienen retornos variables.',
+                    fmt: _fmt,
+                    onChanged: _notify,
+                  )
+                : null,
+          ),
+          const Gap(8),
+          // Arriendos
+          _InvestmentTile(
+            emoji: '🏘️',
+            title: 'Arriendos',
+            subtitle: 'Ingreso mensual neto después de gastos de la propiedad',
+            active: _hasRental,
+            onToggle: (v) => setState(() { _hasRental = v; _notify(); }),
+            child: _hasRental
+                ? _DirectIncomeField(
+                    prefix: _prefix,
+                    controller: _rentalCtrl,
+                    hint: '0',
+                    onChanged: (_) => _notify(),
+                  )
+                : null,
+          ),
+          const Gap(8),
+          // Distribuciones
+          _InvestmentTile(
+            emoji: '💼',
+            title: 'Distribuciones de negocio',
+            subtitle: 'Utilidades o dividendos que recibes de una empresa',
+            active: _hasBusiness,
+            onToggle: (v) => setState(() { _hasBusiness = v; _notify(); }),
+            child: _hasBusiness
+                ? _DirectIncomeField(
+                    prefix: _prefix,
+                    controller: _businessCtrl,
+                    hint: '0',
+                    onChanged: (_) => _notify(),
+                  )
+                : null,
+          ),
+          const Gap(8),
+          // Otros
+          _InvestmentTile(
+            emoji: '💰',
+            title: 'Otros ingresos pasivos',
+            subtitle: 'Regalías, pensión, cripto, ayudas...',
+            active: _hasOther,
+            onToggle: (v) => setState(() { _hasOther = v; _notify(); }),
+            child: _hasOther
+                ? _DirectIncomeField(
+                    prefix: _prefix,
+                    controller: _otherCtrl,
+                    hint: '0',
+                    onChanged: (_) => _notify(),
+                  )
+                : null,
+          ),
+          if (total > 0) ...[
+            const Gap(12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primarySurface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('Total ingresos pasivos/mes:',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                  ),
+                  Text(_fmt(total),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary)),
+                ],
+              ),
+            ),
+          ],
         ],
       ],
     );
   }
 }
 
-class _PassiveRow extends StatelessWidget {
+class _InvestmentTile extends StatelessWidget {
   final String emoji;
-  final String label;
-  final String hint;
-  final String prefix;
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
+  final String title;
+  final String subtitle;
+  final bool active;
+  final ValueChanged<bool> onToggle;
+  final Widget? child;
 
-  const _PassiveRow({
+  const _InvestmentTile({
     required this.emoji,
-    required this.label,
-    required this.hint,
+    required this.title,
+    required this.subtitle,
+    required this.active,
+    required this.onToggle,
+    this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AnimatedContainer(
+      duration: AppConstants.animFast,
+      decoration: BoxDecoration(
+        color: active ? AppColors.primarySurface.withOpacity(0.5) : theme.cardColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: active ? AppColors.primary.withOpacity(0.4) : theme.dividerColor,
+        ),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Text(emoji, style: const TextStyle(fontSize: 18)),
+                const Gap(10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      Text(subtitle,
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: AppColors.textSecondaryDark)),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: active,
+                  onChanged: onToggle,
+                  activeColor: AppColors.primary,
+                ),
+              ],
+            ),
+          ),
+          if (child != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: child!,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Calculator for yield-based instruments (CDTs, funds).
+/// Converts: Capital + Annual Rate → Monthly income
+class _YieldCalculator extends StatelessWidget {
+  final String prefix;
+  final TextEditingController capitalCtrl;
+  final TextEditingController rateCtrl;
+  final double monthly;
+  final String ratePlaceholder;
+  final String rateLabel;
+  final String note;
+  final String Function(double) fmt;
+  final VoidCallback onChanged;
+
+  const _YieldCalculator({
     required this.prefix,
-    required this.controller,
+    required this.capitalCtrl,
+    required this.rateCtrl,
+    required this.monthly,
+    required this.ratePlaceholder,
+    required this.rateLabel,
+    required this.note,
+    required this.fmt,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(emoji, style: const TextStyle(fontSize: 16)),
-        const Gap(8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-              Text(hint,
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: AppColors.textSecondaryDark)),
-            ],
-          ),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Capital invertido:',
+                      style: theme.textTheme.labelMedium
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Gap(4),
+                  TextField(
+                    controller: capitalCtrl,
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) => onChanged(),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      prefixText: prefix,
+                      hintText: '5,000,000',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Gap(10),
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(rateLabel,
+                      style: theme.textTheme.labelMedium
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Gap(4),
+                  TextField(
+                    controller: rateCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => onChanged(),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      suffixText: '%',
+                      hintText: ratePlaceholder,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const Gap(8),
-        SizedBox(
-          width: 110,
-          height: 38,
-          child: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            onChanged: onChanged,
-            style: const TextStyle(fontSize: 13),
-            decoration: InputDecoration(
-              prefixText: prefix,
-              hintText: '0',
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              isDense: true,
+        if (monthly > 0) ...[
+          const Gap(8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.primarySurface,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.calculate_outlined,
+                    size: 14, color: AppColors.primary),
+                const Gap(6),
+                Text('Rendimiento mensual: ',
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: AppColors.textSecondaryDark)),
+                Text(fmt(monthly),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w800)),
+              ],
             ),
           ),
-        ),
+        ],
+        const Gap(6),
+        Text('⚠️ $note',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: AppColors.textSecondaryDark)),
       ],
+    );
+  }
+}
+
+/// Simple direct monthly income field (for rentals, distributions, other).
+class _DirectIncomeField extends StatelessWidget {
+  final String prefix;
+  final TextEditingController controller;
+  final String hint;
+  final ValueChanged<String> onChanged;
+
+  const _DirectIncomeField({
+    required this.prefix,
+    required this.controller,
+    required this.hint,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      onChanged: onChanged,
+      style: const TextStyle(fontSize: 13),
+      decoration: InputDecoration(
+        prefixText: prefix,
+        hintText: hint,
+        labelText: 'Ingreso neto mensual',
+        isDense: true,
+      ),
     );
   }
 }
