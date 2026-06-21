@@ -6,18 +6,43 @@ part of 'market_data_provider.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$marketRatesHash() => r'market_rates_provider_hash';
+// GENERATED CODE - DO NOT MODIFY BY HAND
+// ignore_for_file: type=lint, type=warning
 
-/// See also [marketRates].
 @ProviderFor(marketRates)
-final marketRatesProvider = AutoDisposeFutureProvider<MarketRatesEntity?>.internal(
-  marketRates,
-  name: r'marketRatesProvider',
-  debugGetCreateSourceHash:
-      const bool.fromEnvironment('dart.vm.product') ? null : _$marketRatesHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
+const marketRatesProvider = MarketRatesProvider._();
 
-@Deprecated('Will be removed in 3.0. Use Ref instead')
-typedef MarketRatesRef = AutoDisposeFutureProviderRef<MarketRatesEntity?>;
+final class MarketRatesProvider extends $FunctionalProvider<
+        AsyncValue<MarketRatesEntity?>,
+        MarketRatesEntity?,
+        FutureOr<MarketRatesEntity?>>
+    with
+        $FutureModifier<MarketRatesEntity?>,
+        $FutureProvider<MarketRatesEntity?> {
+  const MarketRatesProvider._()
+      : super(
+          from: null,
+          argument: null,
+          retry: null,
+          name: r'marketRatesProvider',
+          isAutoDispose: true,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$marketRatesHash();
+
+  @$internal
+  @override
+  $FutureProviderElement<MarketRatesEntity?> $createElement(
+          $ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<MarketRatesEntity?> create(Ref ref) {
+    return marketRates(ref);
+  }
+}
+
+String _$marketRatesHash() => r'd1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0';

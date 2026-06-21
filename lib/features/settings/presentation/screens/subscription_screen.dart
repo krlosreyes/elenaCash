@@ -4,11 +4,13 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
-import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../auth/presentation/providers/auth_provider.dart'; // currentUserProvider
+import '../../../subscription/providers/subscription_provider.dart';
 
 class SubscriptionScreen extends ConsumerWidget {
   const SubscriptionScreen({super.key});
@@ -50,13 +52,15 @@ class SubscriptionScreen extends ConsumerWidget {
                   const Gap(12),
                   Text(
                     'ElenaCash Premium',
-                    style: theme.textTheme.headlineMedium?.copyWith(color: AppColors.gold),
+                    style: theme.textTheme.headlineMedium
+                        ?.copyWith(color: AppColors.gold),
                     textAlign: TextAlign.center,
                   ),
                   const Gap(8),
                   Text(
                     'La Vía Rápida hacia tu libertad financiera',
-                    style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondaryDark),
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: AppColors.textSecondaryDark),
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -67,50 +71,46 @@ class SubscriptionScreen extends ConsumerWidget {
 
             if (isPremium) ...[
               _ActiveBadge().animate().fadeIn(delay: 100.ms),
+              const Gap(16),
+              OutlinedButton.icon(
+                onPressed: () => context.pop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+                label: const Text('Volver'),
+              ),
             ] else ...[
               // ── Planes ─────────────────────────────────
               Text('Elige tu plan', style: theme.textTheme.titleLarge)
-                  .animate().fadeIn(delay: 100.ms),
+                  .animate()
+                  .fadeIn(delay: 100.ms),
               const Gap(16),
 
-              _PlanCard(
-                name: 'Premium',
-                priceUSD: '\$4.99/mes',
-                priceCOP: '\$17,100 COP/mes',
-                highlight: true,
-                features: [
-                  'FastLane Score y Árbol del Dinero',
-                  'Todas las lecciones (incluyendo PRO)',
-                  'Análisis de deudas avanzado',
-                  'Revisión mensual completa',
-                  'Exportar datos a CSV',
-                  'Soporte prioritario',
-                ],
-                onSubscribe: () => _subscribe(context, 'premium'),
-              ).animate().fadeIn(delay: 150.ms),
+              // Planes con precios reales de RevenueCat (mobile) o fallback (web)
+              if (kIsWeb)
+                _WebSubscribeCard(theme: theme)
+              else
+                _MobilePackagesView(),
 
               const Gap(12),
-
-              _PlanCard(
-                name: 'Familiar',
-                priceUSD: '\$7.99/mes',
-                priceCOP: '\$27,390 COP/mes',
-                highlight: false,
-                features: [
-                  'Todo de Premium',
-                  'Hasta 5 cuentas familiares',
-                  'Dashboard familiar compartido',
-                  'Metas familiares compartidas',
-                ],
-                onSubscribe: () => _subscribe(context, 'family'),
-              ).animate().fadeIn(delay: 200.ms),
-
-              const Gap(20),
 
               TextButton(
                 onPressed: () => context.pop(),
                 child: const Text('Continuar con la versión gratis'),
               ).animate().fadeIn(delay: 250.ms),
+
+              const Gap(8),
+
+              // Restaurar compras
+              TextButton.icon(
+                onPressed: kIsWeb
+                    ? null
+                    : () => _restore(context, ref),
+                icon: const Icon(Icons.restore_rounded, size: 16),
+                label: const Text('Restaurar compras anteriores'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textSecondaryDark,
+                  textStyle: const TextStyle(fontSize: 12),
+                ),
+              ).animate().fadeIn(delay: 280.ms),
             ],
 
             const Gap(24),
@@ -123,7 +123,8 @@ class SubscriptionScreen extends ConsumerWidget {
             Text(
               'Cancela en cualquier momento. Sin contratos. '
               'La cancelación es efectiva al final del período de facturación.',
-              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: AppColors.textSecondaryDark),
               textAlign: TextAlign.center,
             ).animate().fadeIn(delay: 350.ms),
             const Gap(24),
@@ -133,49 +134,276 @@ class SubscriptionScreen extends ConsumerWidget {
     );
   }
 
-  void _subscribe(BuildContext context, String plan) {
-    if (kIsWeb) {
-      // RevenueCat no soporta Flutter Web; redirigir a la tienda de apps
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Suscripción Premium'),
-          content: const Text(
-            'Para suscribirte a ElenaCash Premium, descarga la app '
-            'en tu dispositivo móvil (iOS o Android) y gestiona tu '
-            'suscripción desde ahí.\n\n'
-            'Si ya tienes una suscripción activa en tu dispositivo, '
-            'tu cuenta Premium se reflejará aquí automáticamente.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => ctx.pop(),
-              child: const Text('Entendido'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                ctx.pop();
-                final uri = Uri.parse('https://elenacash.app');
-                if (await canLaunchUrl(uri)) await launchUrl(uri);
-              },
-              child: const Text('Ver más info'),
-            ),
-          ],
+  Future<void> _restore(BuildContext context, WidgetRef ref) async {
+    final restored =
+        await ref.read(subscriptionNotifierProvider.notifier).restore();
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(restored
+            ? '✅ Suscripción restaurada correctamente.'
+            : 'No se encontraron compras anteriores para restaurar.'),
+        backgroundColor: restored ? AppColors.primary : null,
+      ),
+    );
+  }
+}
+
+// ── Paquetes reales (móvil) ───────────────────────────────────────
+
+class _MobilePackagesView extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final offeringsAsync = ref.watch(purchaseOfferingsProvider);
+    final subState = ref.watch(subscriptionNotifierProvider);
+    final isLoading = subState is AsyncLoading;
+
+    return offeringsAsync.when(
+      data: (offerings) {
+        if (offerings == null || offerings.current == null) {
+          // No hay paquetes configurados en RevenueCat — mostrar fallback
+          return _FallbackPlansView();
+        }
+
+        final packages = offerings.current!.availablePackages;
+        if (packages.isEmpty) return _FallbackPlansView();
+
+        return Column(
+          children: packages.map((pkg) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _PackageCard(
+                package: pkg,
+                isLoading: isLoading,
+                onSubscribe: () => _purchase(context, ref, pkg),
+              ),
+            );
+          }).toList(),
+        );
+      },
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: CircularProgressIndicator(),
+        ),
+      ),
+      error: (_, __) => _FallbackPlansView(),
+    );
+  }
+
+  Future<void> _purchase(
+      BuildContext context, WidgetRef ref, Package package) async {
+    final success =
+        await ref.read(subscriptionNotifierProvider.notifier).purchase(package);
+    if (!context.mounted) return;
+
+    final subState = ref.read(subscriptionNotifierProvider);
+    if (subState is AsyncError) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Error al procesar la compra. Intenta de nuevo.'),
+          backgroundColor: AppColors.error,
         ),
       );
       return;
     }
 
-    // Mobile: RevenueCat purchase flow
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Iniciando compra de plan $plan...'),
-        backgroundColor: AppColors.primary,
-      ),
-    );
-    // TODO (mobile): Purchases.purchaseProduct(AppConstants.premiumMonthlyId)
+    if (success) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎉 ¡Bienvenido a Premium!'),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+        context.pop();
+      }
+    }
   }
 }
+
+class _PackageCard extends StatelessWidget {
+  final Package package;
+  final bool isLoading;
+  final VoidCallback onSubscribe;
+
+  const _PackageCard({
+    required this.package,
+    required this.isLoading,
+    required this.onSubscribe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final product = package.storeProduct;
+    final isAnnual = package.packageType == PackageType.annual;
+    final isMonthly = package.packageType == PackageType.monthly;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isAnnual ? AppColors.gold.withOpacity(0.05) : theme.cardColor,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(
+          color: isAnnual ? AppColors.gold : theme.dividerColor,
+          width: isAnnual ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isAnnual) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.gold.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Text(
+                'Mejor valor · 2 meses gratis',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.gold,
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+            const Gap(8),
+          ],
+          Text(
+            isAnnual ? 'Premium Anual' : isMonthly ? 'Premium Mensual' : product.title,
+            style: theme.textTheme.headlineSmall,
+          ),
+          const Gap(4),
+          Text(
+            product.priceString,
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: isAnnual ? AppColors.gold : AppColors.primary,
+            ),
+          ),
+          if (product.description.isNotEmpty) ...[
+            const Gap(4),
+            Text(product.description, style: theme.textTheme.bodySmall),
+          ],
+          const Gap(16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: isLoading ? null : onSubscribe,
+              style: isAnnual
+                  ? ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.gold,
+                      foregroundColor: Colors.black)
+                  : null,
+              child: isLoading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text('Suscribirme'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Fallback cuando RevenueCat no tiene paquetes configurados ──────
+
+class _FallbackPlansView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _StaticPlanCard(
+          name: 'Premium',
+          priceUSD: '\$4.99/mes',
+          priceCOP: '~\$17,100 COP',
+          highlight: true,
+          features: [
+            'FastLane Score y Árbol del Dinero',
+            'Todas las lecciones (incluyendo PRO)',
+            'Análisis de deudas avanzado',
+            'Revisión mensual completa',
+            'Exportar datos a CSV',
+            'Soporte prioritario',
+          ],
+        ),
+        const Gap(12),
+        _StaticPlanCard(
+          name: 'Familiar',
+          priceUSD: '\$7.99/mes',
+          priceCOP: '~\$27,390 COP',
+          highlight: false,
+          features: [
+            'Todo de Premium',
+            'Hasta 5 cuentas familiares',
+            'Dashboard familiar compartido',
+            'Metas familiares compartidas',
+          ],
+        ),
+        const Gap(12),
+        const Text(
+          'Disponible pronto en App Store y Google Play',
+          style: TextStyle(color: AppColors.textSecondaryDark, fontSize: 13),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+}
+
+// ── Web fallback ──────────────────────────────────────────────────
+
+class _WebSubscribeCard extends StatelessWidget {
+  final ThemeData theme;
+  const _WebSubscribeCard({required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppConstants.cardRadius),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: [
+          const Text('📱', style: TextStyle(fontSize: 40)),
+          const Gap(12),
+          Text(
+            'Suscríbete desde la app móvil',
+            style: theme.textTheme.titleLarge,
+            textAlign: TextAlign.center,
+          ),
+          const Gap(8),
+          Text(
+            'Las suscripciones se gestionan desde iOS o Android. '
+            'Si ya tienes Premium activo en tu dispositivo, '
+            'se reflejará automáticamente aquí.',
+            style: theme.textTheme.bodyMedium,
+            textAlign: TextAlign.center,
+          ),
+          const Gap(16),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final uri = Uri.parse('https://elenacash.app');
+              if (await canLaunchUrl(uri)) await launchUrl(uri);
+            },
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Ver más info'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Active Badge ──────────────────────────────────────────────────
 
 class _ActiveBadge extends StatelessWidget {
   @override
@@ -195,9 +423,17 @@ class _ActiveBadge extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Premium activo', style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.primary)),
-                Text('Gracias por apoyar ElenaCash.',
-                    style: Theme.of(context).textTheme.bodyMedium),
+                Text(
+                  'Premium activo',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(color: AppColors.primary),
+                ),
+                Text(
+                  'Gracias por apoyar ElenaCash.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
               ],
             ),
           ),
@@ -207,19 +443,19 @@ class _ActiveBadge extends StatelessWidget {
   }
 }
 
-class _PlanCard extends StatelessWidget {
+// ── Static Plan Card (fallback) ───────────────────────────────────
+
+class _StaticPlanCard extends StatelessWidget {
   final String name, priceUSD, priceCOP;
   final bool highlight;
   final List<String> features;
-  final VoidCallback onSubscribe;
 
-  const _PlanCard({
+  const _StaticPlanCard({
     required this.name,
     required this.priceUSD,
     required this.priceCOP,
     required this.highlight,
     required this.features,
-    required this.onSubscribe,
   });
 
   @override
@@ -237,49 +473,67 @@ class _PlanCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (highlight)
+          if (highlight) ...[
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
                 color: AppColors.gold.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Text('Más popular', style: TextStyle(fontSize: 11, color: AppColors.gold, fontWeight: FontWeight.w700)),
+              child: const Text('Más popular',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.w700)),
             ),
-          if (highlight) const Gap(8),
+            const Gap(8),
+          ],
           Text(name, style: theme.textTheme.headlineSmall),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(priceUSD, style: theme.textTheme.titleLarge?.copyWith(
-                color: highlight ? AppColors.gold : AppColors.primary,
-              )),
+              Text(
+                priceUSD,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: highlight ? AppColors.gold : AppColors.primary,
+                ),
+              ),
               const Gap(8),
               Text(priceCOP, style: theme.textTheme.bodySmall),
             ],
           ),
           const Gap(16),
           ...features.map((f) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              children: [
-                Icon(Icons.check_circle_rounded,
-                    color: highlight ? AppColors.gold : AppColors.primary, size: 16),
-                const Gap(8),
-                Expanded(child: Text(f, style: theme.textTheme.bodyMedium)),
-              ],
-            ),
-          )),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded,
+                        color: highlight ? AppColors.gold : AppColors.primary,
+                        size: 16),
+                    const Gap(8),
+                    Expanded(
+                        child: Text(f, style: theme.textTheme.bodyMedium)),
+                  ],
+                ),
+              )),
           const Gap(16),
-          SizedBox(
+          Container(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onSubscribe,
-              style: highlight
-                  ? ElevatedButton.styleFrom(backgroundColor: AppColors.gold, foregroundColor: Colors.black)
-                  : null,
-              child: Text('Suscribirme a $name'),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: (highlight ? AppColors.gold : AppColors.primary)
+                  .withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'Próximamente en App Store y Play Store',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: highlight ? AppColors.gold : AppColors.primary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -287,6 +541,8 @@ class _PlanCard extends StatelessWidget {
     );
   }
 }
+
+// ── Feature Comparison Table ──────────────────────────────────────
 
 class _FeatureComparisonTable extends StatelessWidget {
   @override
@@ -319,40 +575,48 @@ class _FeatureComparisonTable extends StatelessWidget {
                 const Expanded(child: SizedBox()),
                 Text('Free', style: theme.textTheme.titleSmall),
                 const SizedBox(width: 48),
-                Text('Pro', style: theme.textTheme.titleSmall?.copyWith(color: AppColors.gold)),
+                Text('Pro',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(color: AppColors.gold)),
                 const SizedBox(width: 8),
               ],
             ),
           ),
           const Divider(height: 1),
           ...rows.map((r) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(child: Text(r.$1, style: theme.textTheme.bodySmall)),
-                SizedBox(
-                  width: 48,
-                  child: Center(
-                    child: Icon(
-                      r.$2 ? Icons.check_rounded : Icons.remove_rounded,
-                      size: 16,
-                      color: r.$2 ? AppColors.primary : AppColors.textSecondaryDark,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: Text(r.$1, style: theme.textTheme.bodySmall)),
+                    SizedBox(
+                      width: 48,
+                      child: Center(
+                        child: Icon(
+                          r.$2 ? Icons.check_rounded : Icons.remove_rounded,
+                          size: 16,
+                          color: r.$2
+                              ? AppColors.primary
+                              : AppColors.textSecondaryDark,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                SizedBox(
-                  width: 48,
-                  child: Center(
-                    child: Icon(
-                      r.$3 ? Icons.check_rounded : Icons.remove_rounded,
-                      size: 16,
-                      color: r.$3 ? AppColors.gold : AppColors.textSecondaryDark,
+                    SizedBox(
+                      width: 48,
+                      child: Center(
+                        child: Icon(
+                          r.$3 ? Icons.check_rounded : Icons.remove_rounded,
+                          size: 16,
+                          color: r.$3
+                              ? AppColors.gold
+                              : AppColors.textSecondaryDark,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          )),
+              )),
           const Gap(8),
         ],
       ),

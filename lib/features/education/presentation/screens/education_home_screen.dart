@@ -106,7 +106,7 @@ class EducationHomeScreen extends ConsumerWidget {
                       quiz: quiz,
                       lastAttempt: lastAttempt,
                       onTap: () => context.push('${AppRoutes.education}/quiz/${quiz.id}'),
-                    ).animate().fadeIn(delay: Duration(milliseconds: 360 + e.key * 60));
+                    ).animate().fadeIn(delay: Duration(milliseconds: (360 + e.key * 60).toInt()));
                   }).toList(),
                 );
               },

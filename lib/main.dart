@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
 
+import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_mode_provider.dart';
@@ -15,6 +19,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // ── RevenueCat — solo móvil (no funciona en Flutter Web) ─────────
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    final apiKey = Platform.isAndroid
+        ? AppConstants.revenueCatApiKeyAndroid
+        : AppConstants.revenueCatApiKeyIOS;
+    await Purchases.configure(PurchasesConfiguration(apiKey));
+    await Purchases.setLogLevel(LogLevel.error);
+  }
 
   // Crashlytics: solo activo en release y cuando Firebase está configurado
   if (!kDebugMode) {
