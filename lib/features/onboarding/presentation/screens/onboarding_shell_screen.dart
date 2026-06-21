@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/router/app_router.dart';
-import '../../../../core/utils/validators.dart';
 import '../../../../shared/providers/firebase_providers.dart';
 
 class OnboardingShellScreen extends ConsumerStatefulWidget {
@@ -26,7 +25,8 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   // Step 1 – Rich Life (selección múltiple estructurada)
   final List<String> _richLifeCategories = [];
   // Step 2 – Ingresos
-  final _incomeCtrl = TextEditingController();
+  double _netMonthlyIncome = 0;
+  Map<String, dynamic> _incomeBreakdown = {};
   String _currency = 'COP';
   // Step 3 – Percentages (usa defaults)
   double _fixedPct = AppConstants.defaultFixedCostsPct;
@@ -39,7 +39,6 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   @override
   void dispose() {
     _controller.dispose();
-    _incomeCtrl.dispose();
     super.dispose();
   }
 
@@ -61,9 +60,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
 
     try {
       final firestore = ref.read(firebaseFirestoreProvider);
-      final income = double.tryParse(
-            _incomeCtrl.text.replaceAll(RegExp(r'[^0-9.]'), ''),
-          ) ?? 0;
+      final income = _netMonthlyIncome;
 
       // Usar batch para escribir todo atómicamente
       final batch = firestore.batch();
@@ -90,15 +87,16 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. Perfil del usuario: onboarding + Rich Life categorías
+      // 2. Perfil del usuario: onboarding + Rich Life + desglose de ingresos
       final userRef = firestore.collection(AppConstants.colUsers).doc(uid);
       batch.set(userRef, {
         'onboardingCompleted': true,
+        'monthlyNetIncome': income,
         'richLifeCategories': _richLifeCategories,
-        // descripción legible generada desde las categorías seleccionadas
         'richLifeDescription': _richLifeCategories
             .map((id) => _RichLifeOption.labelFor(id))
             .join(', '),
+        'incomeBreakdown': _incomeBreakdown,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
@@ -144,9 +142,10 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
                     onNext: _next,
                   ),
                   _IncomePage(
-                    controller: _incomeCtrl,
                     currency: _currency,
                     onCurrencyChanged: (v) => setState(() => _currency = v),
+                    onIncomeChanged: (v) => setState(() => _netMonthlyIncome = v),
+                    onBreakdownChanged: (v) => setState(() => _incomeBreakdown = v),
                     onNext: _next,
                   ),
                   _BucketPage(
@@ -507,71 +506,820 @@ class _RichLifeCard extends StatelessWidget {
   }
 }
 
-class _IncomePage extends StatelessWidget {
-  final TextEditingController controller;
+// ── Income types ──────────────────────────────────────────────────
+
+enum _IncomeType { employee, freelance, mixed }
+
+class _IncomePage extends StatefulWidget {
   final String currency;
   final ValueChanged<String> onCurrencyChanged;
+  final ValueChanged<double> onIncomeChanged;
+  final ValueChanged<Map<String, dynamic>> onBreakdownChanged;
   final VoidCallback onNext;
+
   const _IncomePage({
-    required this.controller,
     required this.currency,
     required this.onCurrencyChanged,
+    required this.onIncomeChanged,
+    required this.onBreakdownChanged,
     required this.onNext,
+  });
+
+  @override
+  State<_IncomePage> createState() => _IncomePageState();
+}
+
+class _IncomePageState extends State<_IncomePage> {
+  int _subStep = 0;
+  _IncomeType? _type;
+
+  // Employee fields
+  final _salaryCtrl = TextEditingController();
+  final _prestComCtrl = TextEditingController();
+  final _nonPrestComCtrl = TextEditingController();
+  bool _hasCommissions = false;
+
+  // Freelance fields
+  String _freelanceActivity = 'services';
+  final _grossCtrl = TextEditingController();
+  final _expensesCtrl = TextEditingController();
+  final _socialSecCtrl = TextEditingController();
+  bool _hasSocialSecurity = false;
+
+  // Mixed fields
+  final _empNetCtrl = TextEditingController();
+  final _freNetCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _salaryCtrl.dispose();
+    _prestComCtrl.dispose();
+    _nonPrestComCtrl.dispose();
+    _grossCtrl.dispose();
+    _expensesCtrl.dispose();
+    _socialSecCtrl.dispose();
+    _empNetCtrl.dispose();
+    _freNetCtrl.dispose();
+    super.dispose();
+  }
+
+  double _parse(String v) =>
+      double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+  double get _computedNet {
+    switch (_type) {
+      case _IncomeType.employee:
+        final salary = _parse(_salaryCtrl.text);
+        final prestCom = _hasCommissions ? _parse(_prestComCtrl.text) : 0.0;
+        final nonPrestCom = _hasCommissions ? _parse(_nonPrestComCtrl.text) : 0.0;
+        // 4% salud + 4% pensión sobre base prestacional
+        final prestBase = salary + prestCom;
+        return prestBase * 0.92 + nonPrestCom;
+      case _IncomeType.freelance:
+        final gross = _parse(_grossCtrl.text);
+        final expenses = _parse(_expensesCtrl.text);
+        final social = _hasSocialSecurity ? _parse(_socialSecCtrl.text) : 0.0;
+        return gross - expenses - social;
+      case _IncomeType.mixed:
+        return _parse(_empNetCtrl.text) + _parse(_freNetCtrl.text);
+      default:
+        return 0;
+    }
+  }
+
+  Map<String, dynamic> get _breakdown {
+    switch (_type) {
+      case _IncomeType.employee:
+        return {
+          'type': 'employee',
+          'salarioBaseBruto': _parse(_salaryCtrl.text),
+          if (_hasCommissions) 'comisionesPrestacionales': _parse(_prestComCtrl.text),
+          if (_hasCommissions) 'comisionesNoPrestacionales': _parse(_nonPrestComCtrl.text),
+          'deduccionesEstimadas': (_parse(_salaryCtrl.text) + (_hasCommissions ? _parse(_prestComCtrl.text) : 0)) * 0.08,
+          'netoEstimado': _computedNet,
+        };
+      case _IncomeType.freelance:
+        return {
+          'type': 'freelance',
+          'actividad': _freelanceActivity,
+          'ingresosBrutos': _parse(_grossCtrl.text),
+          'gastosOperacionales': _parse(_expensesCtrl.text),
+          if (_hasSocialSecurity) 'seguridadSocial': _parse(_socialSecCtrl.text),
+          'netoEstimado': _computedNet,
+        };
+      case _IncomeType.mixed:
+        return {
+          'type': 'mixed',
+          'netoEmpleado': _parse(_empNetCtrl.text),
+          'netoIndependiente': _parse(_freNetCtrl.text),
+          'netoEstimado': _computedNet,
+        };
+      default:
+        return {};
+    }
+  }
+
+  bool get _canContinue {
+    switch (_type) {
+      case _IncomeType.employee:
+        return _parse(_salaryCtrl.text) > 0;
+      case _IncomeType.freelance:
+        return _parse(_grossCtrl.text) > 0;
+      case _IncomeType.mixed:
+        return _parse(_empNetCtrl.text) + _parse(_freNetCtrl.text) > 0;
+      default:
+        return false;
+    }
+  }
+
+  void _selectType(_IncomeType type) {
+    setState(() {
+      _type = type;
+      _subStep = 1;
+    });
+  }
+
+  void _handleNext() {
+    widget.onIncomeChanged(_computedNet);
+    widget.onBreakdownChanged(_breakdown);
+    widget.onNext();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_subStep == 1)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: TextButton.icon(
+              onPressed: () => setState(() { _subStep = 0; _type = null; }),
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 14),
+              label: const Text('Tipo de ingreso'),
+            ),
+          ),
+        if (_subStep == 0)
+          _buildTypeSelection()
+        else
+          Expanded(child: _buildIncomeForm()),
+      ],
+    );
+  }
+
+  Widget _buildTypeSelection() {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(AppConstants.defaultPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Gap(16),
+            Text('💰', style: const TextStyle(fontSize: 48)).animate().fadeIn(),
+            const Gap(12),
+            Text('¿Cómo generas tus ingresos?', style: theme.textTheme.headlineSmall)
+                .animate().fadeIn(delay: 100.ms),
+            const Gap(6),
+            Text(
+              'Elige la opción que mejor te describe. '
+              'Así calculamos tu ingreso disponible real.',
+              style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark),
+            ).animate().fadeIn(delay: 150.ms),
+            const Gap(28),
+            _IncomeTypeCard(
+              emoji: '🏢',
+              title: 'Empleado',
+              description: 'Recibo salario fijo de un empleador',
+              onTap: () => _selectType(_IncomeType.employee),
+            ).animate(delay: 200.ms).fadeIn().slideX(begin: 0.05),
+            const Gap(12),
+            _IncomeTypeCard(
+              emoji: '💼',
+              title: 'Independiente / Freelancer',
+              description: 'Trabajo por honorarios, ventas o negocios propios',
+              onTap: () => _selectType(_IncomeType.freelance),
+            ).animate(delay: 280.ms).fadeIn().slideX(begin: 0.05),
+            const Gap(12),
+            _IncomeTypeCard(
+              emoji: '⚡',
+              title: 'Mixto',
+              description: 'Soy empleado y también tengo ingresos independientes',
+              onTap: () => _selectType(_IncomeType.mixed),
+            ).animate(delay: 360.ms).fadeIn().slideX(begin: 0.05),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIncomeForm() {
+    return switch (_type) {
+      _IncomeType.employee => _buildEmployeeForm(),
+      _IncomeType.freelance => _buildFreelanceForm(),
+      _IncomeType.mixed => _buildMixedForm(),
+      null => const SizedBox(),
+    };
+  }
+
+  Widget _buildEmployeeForm() {
+    final theme = Theme.of(context);
+    final salary = _parse(_salaryCtrl.text);
+    final prestCom = _hasCommissions ? _parse(_prestComCtrl.text) : 0.0;
+    final nonPrestCom = _hasCommissions ? _parse(_nonPrestComCtrl.text) : 0.0;
+    final prestBase = salary + prestCom;
+    final deductions = prestBase * 0.08;
+    final net = _computedNet;
+    final hasData = salary > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.defaultPadding),
+            children: [
+              const Gap(8),
+              Text('🏢 Ingreso como empleado',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const Gap(4),
+              Text('Ingresa valores brutos — calculamos el neto automáticamente.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              _CurrencySelector(currency: widget.currency, onChanged: widget.onCurrencyChanged),
+              const Gap(18),
+              _IncomeField(
+                label: 'Salario base mensual bruto',
+                hint: widget.currency == 'COP' ? '3,000,000' : '2,000',
+                prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                controller: _salaryCtrl,
+                onChanged: (_) => setState(() {}),
+              ),
+              const Gap(4),
+              Text('Tu salario antes de descuentos de nómina.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('¿Recibes comisiones o bonos?',
+                        style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  ),
+                  Switch.adaptive(
+                    value: _hasCommissions,
+                    onChanged: (v) => setState(() => _hasCommissions = v),
+                    activeColor: AppColors.primary,
+                  ),
+                ],
+              ),
+              if (_hasCommissions) ...[
+                const Gap(12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('ℹ️ Tipos de comisiones',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                              color: AppColors.primary, fontWeight: FontWeight.w700)),
+                      const Gap(6),
+                      Text(
+                        '• Prestacionales: base para prima, cesantías y vacaciones. '
+                        'Se les descuenta salud y pensión (8%).',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const Gap(4),
+                      Text(
+                        '• No prestacionales: bonos o pagos extra que NO entran en la '
+                        'liquidación de prestaciones sociales.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const Gap(14),
+                _IncomeField(
+                  label: 'Comisiones prestacionales',
+                  hint: '0',
+                  prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                  controller: _prestComCtrl,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const Gap(4),
+                Text('Se incluyen en la base de prima, cesantías y vacaciones.',
+                    style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+                const Gap(14),
+                _IncomeField(
+                  label: 'Comisiones no prestacionales',
+                  hint: '0',
+                  prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                  controller: _nonPrestComCtrl,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const Gap(4),
+                Text('Bonos o pagos extra sin efecto en prestaciones sociales.',
+                    style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              ],
+              const Gap(24),
+              if (hasData)
+                _NetCalculatorCard(
+                  currency: widget.currency,
+                  rows: [
+                    _CalcRow('Salario base bruto', salary, isDeduction: false),
+                    if (_hasCommissions && prestCom > 0)
+                      _CalcRow('+ Comisiones prestacionales', prestCom, isDeduction: false),
+                    _CalcRow('- Salud (4%) + Pensión (4%)', deductions, isDeduction: true),
+                    if (_hasCommissions && nonPrestCom > 0)
+                      _CalcRow('+ Comisiones no prestacionales', nonPrestCom, isDeduction: false),
+                  ],
+                  net: net,
+                  note: 'La retención en la fuente varía según tu nivel salarial y no está incluida.',
+                ),
+              const Gap(24),
+            ],
+          ),
+        ),
+        _NextButton(enabled: _canContinue, onTap: _handleNext),
+      ],
+    );
+  }
+
+  Widget _buildFreelanceForm() {
+    final theme = Theme.of(context);
+    final gross = _parse(_grossCtrl.text);
+    final expenses = _parse(_expensesCtrl.text);
+    final social = _hasSocialSecurity ? _parse(_socialSecCtrl.text) : 0.0;
+    final net = _computedNet;
+    final hasData = gross > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.defaultPadding),
+            children: [
+              const Gap(8),
+              Text('💼 Ingreso independiente',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const Gap(4),
+              Text('Calculamos lo que realmente queda disponible.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              _CurrencySelector(currency: widget.currency, onChanged: widget.onCurrencyChanged),
+              const Gap(18),
+              Text('Tipo de actividad:',
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+              const Gap(8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _ActivityChip(
+                      label: '👨‍💻 Servicios / Honorarios',
+                      value: 'services',
+                      selected: _freelanceActivity,
+                      onTap: (v) => setState(() => _freelanceActivity = v)),
+                  _ActivityChip(
+                      label: '🛒 Ventas / Comercio',
+                      value: 'sales',
+                      selected: _freelanceActivity,
+                      onTap: (v) => setState(() => _freelanceActivity = v)),
+                  _ActivityChip(
+                      label: '🏘️ Arriendos',
+                      value: 'rental',
+                      selected: _freelanceActivity,
+                      onTap: (v) => setState(() => _freelanceActivity = v)),
+                  _ActivityChip(
+                      label: '🔀 Mixto',
+                      value: 'mixed_act',
+                      selected: _freelanceActivity,
+                      onTap: (v) => setState(() => _freelanceActivity = v)),
+                ],
+              ),
+              const Gap(20),
+              _IncomeField(
+                label: 'Ingresos brutos promedio mensual',
+                hint: widget.currency == 'COP' ? '5,000,000' : '3,000',
+                prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                controller: _grossCtrl,
+                onChanged: (_) => setState(() {}),
+              ),
+              const Gap(4),
+              Text('Total que recibes de clientes o ventas antes de cualquier descuento.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              _IncomeField(
+                label: 'Gastos del negocio mensuales (opcional)',
+                hint: '0',
+                prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                controller: _expensesCtrl,
+                onChanged: (_) => setState(() {}),
+              ),
+              const Gap(4),
+              Text('Software, arriendo, transporte, insumos, etc.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('¿Cotizas seguridad social?',
+                            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        Text('Salud + pensión como independiente',
+                            style: theme.textTheme.labelSmall
+                                ?.copyWith(color: AppColors.textSecondaryDark)),
+                      ],
+                    ),
+                  ),
+                  Switch.adaptive(
+                    value: _hasSocialSecurity,
+                    onChanged: (v) => setState(() => _hasSocialSecurity = v),
+                    activeColor: AppColors.primary,
+                  ),
+                ],
+              ),
+              if (_hasSocialSecurity) ...[
+                const Gap(12),
+                _IncomeField(
+                  label: 'Aporte mensual a seguridad social',
+                  hint: '0',
+                  prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                  controller: _socialSecCtrl,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const Gap(4),
+                Text(
+                  'Como independiente aportas aprox. 28.5% sobre el 40% de tus ingresos brutos.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark),
+                ),
+              ],
+              const Gap(24),
+              if (hasData)
+                _NetCalculatorCard(
+                  currency: widget.currency,
+                  rows: [
+                    _CalcRow('Ingresos brutos', gross, isDeduction: false),
+                    if (expenses > 0)
+                      _CalcRow('- Gastos operacionales', expenses, isDeduction: true),
+                    if (_hasSocialSecurity && social > 0)
+                      _CalcRow('- Seguridad social', social, isDeduction: true),
+                  ],
+                  net: net,
+                  note: 'No incluye retención en la fuente (varía según tipo de servicio y cliente).',
+                ),
+              const Gap(24),
+            ],
+          ),
+        ),
+        _NextButton(enabled: _canContinue, onTap: _handleNext),
+      ],
+    );
+  }
+
+  Widget _buildMixedForm() {
+    final theme = Theme.of(context);
+    final empNet = _parse(_empNetCtrl.text);
+    final freNet = _parse(_freNetCtrl.text);
+    final net = _computedNet;
+    final hasData = net > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: AppConstants.defaultPadding),
+            children: [
+              const Gap(8),
+              Text('⚡ Ingresos mixtos',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              const Gap(4),
+              Text('Ingresa el neto de cada fuente por separado.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(20),
+              _CurrencySelector(currency: widget.currency, onChanged: widget.onCurrencyChanged),
+              const Gap(20),
+              Text('Como empleado:',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600, color: AppColors.textSecondaryDark)),
+              const Gap(8),
+              _IncomeField(
+                label: 'Neto mensual como empleado',
+                hint: '0',
+                prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                controller: _empNetCtrl,
+                onChanged: (_) => setState(() {}),
+              ),
+              const Gap(4),
+              Text('Lo que llega a tu cuenta después de salud, pensión y retenciones.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(24),
+              Text('Como independiente:',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600, color: AppColors.textSecondaryDark)),
+              const Gap(8),
+              _IncomeField(
+                label: 'Neto mensual independiente',
+                hint: '0',
+                prefix: widget.currency == 'COP' ? '\$ ' : 'USD ',
+                controller: _freNetCtrl,
+                onChanged: (_) => setState(() {}),
+              ),
+              const Gap(4),
+              Text('Lo que queda después de gastos del negocio y seguridad social.',
+                  style: theme.textTheme.labelSmall?.copyWith(color: AppColors.textSecondaryDark)),
+              const Gap(24),
+              if (hasData)
+                _NetCalculatorCard(
+                  currency: widget.currency,
+                  rows: [
+                    _CalcRow('Neto como empleado', empNet, isDeduction: false),
+                    _CalcRow('+ Neto independiente', freNet, isDeduction: false),
+                  ],
+                  net: net,
+                  note: null,
+                ),
+              const Gap(24),
+            ],
+          ),
+        ),
+        _NextButton(enabled: _canContinue, onTap: _handleNext),
+      ],
+    );
+  }
+}
+
+// ── Income helper widgets ─────────────────────────────────────────
+
+class _IncomeTypeCard extends StatelessWidget {
+  final String emoji;
+  final String title;
+  final String description;
+  final VoidCallback onTap;
+
+  const _IncomeTypeCard({
+    required this.emoji,
+    required this.title,
+    required this.description,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(AppConstants.defaultPadding),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(AppConstants.buttonRadius),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 28)),
+            const Gap(14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: theme.textTheme.bodyLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  Text(description,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: AppColors.textSecondaryDark)),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 14, color: theme.dividerColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IncomeField extends StatelessWidget {
+  final String label;
+  final String hint;
+  final String prefix;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _IncomeField({
+    required this.label,
+    required this.hint,
+    required this.prefix,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        const Gap(6),
+        TextField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: false),
+          onChanged: onChanged,
+          decoration: InputDecoration(prefixText: prefix, hintText: hint),
+        ),
+      ],
+    );
+  }
+}
+
+class _CurrencySelector extends StatelessWidget {
+  final String currency;
+  final ValueChanged<String> onChanged;
+
+  const _CurrencySelector({required this.currency, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text('Moneda:',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        const Gap(12),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'COP', label: Text('COP')),
+            ButtonSegment(value: 'USD', label: Text('USD')),
+          ],
+          selected: {currency},
+          onSelectionChanged: (s) => onChanged(s.first),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActivityChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final String selected;
+  final ValueChanged<String> onTap;
+
+  const _ActivityChip({
+    required this.label,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = value == selected;
+    return GestureDetector(
+      onTap: () => onTap(value),
+      child: AnimatedContainer(
+        duration: AppConstants.animFast,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primarySurface : Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : Theme.of(context).dividerColor,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+            color: isSelected ? AppColors.primary : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CalcRow {
+  final String label;
+  final double amount;
+  final bool isDeduction;
+  const _CalcRow(this.label, this.amount, {required this.isDeduction});
+}
+
+class _NetCalculatorCard extends StatelessWidget {
+  final String currency;
+  final List<_CalcRow> rows;
+  final double net;
+  final String? note;
+
+  const _NetCalculatorCard({
+    required this.currency,
+    required this.rows,
+    required this.net,
+    this.note,
+  });
+
+  String _fmt(double v) {
+    if (currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.primarySurface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withOpacity(0.4)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Gap(32),
-          Text('💰', style: const TextStyle(fontSize: 48)).animate().fadeIn(),
-          const Gap(16),
-          Text('¿Cuánto ganas al mes?', style: theme.textTheme.headlineSmall)
-              .animate().fadeIn(delay: 100.ms),
-          const Gap(8),
-          Text(
-            'Solo el ingreso neto que llega a tu cuenta. '
-            'Si te pagan quincenal, multiplica por 2.',
-            style: theme.textTheme.bodyMedium,
-          ).animate().fadeIn(delay: 200.ms),
-          const Gap(24),
+          Text('📊 Ingreso neto estimado',
+              style: theme.textTheme.labelLarge
+                  ?.copyWith(color: AppColors.primary, fontWeight: FontWeight.w700)),
+          const Gap(10),
+          ...rows.map((r) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(r.label, style: theme.textTheme.bodySmall)),
+                    Text(
+                      r.isDeduction ? '- ${_fmt(r.amount)}' : _fmt(r.amount),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: r.isDeduction ? AppColors.error : null,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+          const Divider(height: 16),
           Row(
             children: [
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'COP', label: Text('COP')),
-                  ButtonSegment(value: 'USD', label: Text('USD')),
-                ],
-                selected: {currency},
-                onSelectionChanged: (s) => onCurrencyChanged(s.first),
+              Expanded(
+                child: Text('Neto mensual disponible',
+                    style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
               ),
+              Text(_fmt(net),
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  )),
             ],
-          ).animate().fadeIn(delay: 250.ms),
-          const Gap(12),
-          TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              prefixText: currency == 'COP' ? '\$ ' : 'USD ',
-              hintText: currency == 'COP' ? '3,000,000' : '2,000',
-            ),
-          ).animate().fadeIn(delay: 300.ms),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              onPressed: () {
-                if (controller.text.isNotEmpty) onNext();
-              },
-              child: const Text('Siguiente'),
-            ),
           ),
+          if (note != null) ...[
+            const Gap(8),
+            Text('⚠️ $note',
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: AppColors.textSecondaryDark)),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _NextButton extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _NextButton({required this.enabled, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(AppConstants.defaultPadding),
+      child: SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton(
+          onPressed: enabled ? onTap : null,
+          child: const Text('Siguiente →'),
+        ),
       ),
     );
   }
