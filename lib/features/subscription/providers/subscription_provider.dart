@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -8,11 +11,27 @@ import '../../../shared/providers/firebase_providers.dart';
 part 'subscription_provider.g.dart';
 
 // ── CustomerInfo stream ───────────────────────────────────────────
+// purchases_flutter v10 no expone un Stream directamente.
+// Usamos addCustomerInfoUpdateListener + StreamController.
 
 @riverpod
 Stream<CustomerInfo> customerInfoStream(Ref ref) {
   if (kIsWeb) return const Stream.empty();
-  return Purchases.customerInfoStream;
+
+  final controller = StreamController<CustomerInfo>.broadcast();
+
+  void listener(CustomerInfo info) {
+    if (!controller.isClosed) controller.add(info);
+  }
+
+  Purchases.addCustomerInfoUpdateListener(listener);
+
+  ref.onDispose(() {
+    Purchases.removeCustomerInfoUpdateListener(listener);
+    controller.close();
+  });
+
+  return controller.stream;
 }
 
 // ── Offerings (packages disponibles para compra) ──────────────────
@@ -39,15 +58,18 @@ class SubscriptionNotifier extends _$SubscriptionNotifier {
   Future<bool> purchase(Package package) async {
     state = const AsyncLoading();
     try {
-      final customerInfo = await Purchases.purchasePackage(package);
+      // purchasePackage devuelve PurchaseResult, no CustomerInfo
+      final result = await Purchases.purchasePackage(package);
+      final customerInfo = result.customerInfo;
       final isActive = _isEntitlementActive(customerInfo);
       if (isActive) {
         await _syncPremiumToFirestore(isPremium: true);
       }
       state = const AsyncData(null);
       return isActive;
-    } on PurchasesErrorCode catch (e) {
-      if (e == PurchasesErrorCode.purchaseCancelledError) {
+    } on PlatformException catch (e) {
+      final errorCode = PurchasesErrorHelper.getErrorCode(e);
+      if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
         // El usuario canceló — no es un error real
         state = const AsyncData(null);
         return false;
@@ -61,6 +83,7 @@ class SubscriptionNotifier extends _$SubscriptionNotifier {
   }
 
   /// Restaura compras anteriores.
+  /// restorePurchases() devuelve CustomerInfo directamente.
   Future<bool> restore() async {
     state = const AsyncLoading();
     try {
@@ -90,8 +113,8 @@ class SubscriptionNotifier extends _$SubscriptionNotifier {
           .doc(userId)
           .set({'isPremium': isPremium}, SetOptions(merge: true));
     } catch (_) {
-      // No bloquear la compra si el sync falla — Firestore se actualizará
-      // en el siguiente authStateChanges
+      // No bloquear la compra si el sync falla.
+      // authStateChanges actualizará isPremium en el próximo refresh.
     }
   }
 }
