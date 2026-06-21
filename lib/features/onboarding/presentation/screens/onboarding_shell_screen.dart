@@ -28,7 +28,11 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   double _netMonthlyIncome = 0;
   Map<String, dynamic> _incomeBreakdown = {};
   String _currency = 'COP';
-  // Step 3 – Percentages (usa defaults)
+  // Step 3 – Gastos fijos
+  Map<String, double> _expenseAmounts = {};
+  // Step 4 – Deudas
+  List<Map<String, dynamic>> _debtEntries = [];
+  // Step 5 – Percentages (usa defaults)
   double _fixedPct = AppConstants.defaultFixedCostsPct;
   double _savPct = AppConstants.defaultSavingsPct;
   double _invPct = AppConstants.defaultInvestmentsPct;
@@ -43,7 +47,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
   }
 
   void _next() {
-    if (_page < 3) {
+    if (_page < 5) {
       _controller.nextPage(
         duration: AppConstants.animMedium,
         curve: Curves.easeInOut,
@@ -87,7 +91,11 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. Perfil del usuario: onboarding + Rich Life + desglose de ingresos
+      final totalExpenses = _expenseAmounts.values.fold(0.0, (a, b) => a + b);
+      final totalDebtPayments = _debtEntries.fold(
+          0.0, (a, d) => a + (d['monthlyPayment'] as num? ?? 0).toDouble());
+
+      // 2. Perfil del usuario: onboarding + Rich Life + ingresos + gastos
       final userRef = firestore.collection(AppConstants.colUsers).doc(uid);
       batch.set(userRef, {
         'onboardingCompleted': true,
@@ -97,8 +105,22 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
             .map((id) => _RichLifeOption.labelFor(id))
             .join(', '),
         'incomeBreakdown': _incomeBreakdown,
+        'expenseBreakdown': _expenseAmounts,
+        'totalMonthlyExpenses': totalExpenses,
+        'totalMonthlyDebtPayments': totalDebtPayments,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // 3. Deudas como subcolección
+      for (final debt in _debtEntries) {
+        final debtRef = userRef.collection(AppConstants.colDebts).doc();
+        batch.set(debtRef, {
+          ...debt,
+          'userId': uid,
+          'isActive': true,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       await batch.commit();
 
@@ -122,7 +144,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
           children: [
             // Progress
             LinearProgressIndicator(
-              value: (_page + 1) / 4,
+              value: (_page + 1) / 6,
               color: AppColors.primary,
               backgroundColor: AppColors.surfaceDark,
             ),
@@ -146,6 +168,16 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
                     onCurrencyChanged: (v) => setState(() => _currency = v),
                     onIncomeChanged: (v) => setState(() => _netMonthlyIncome = v),
                     onBreakdownChanged: (v) => setState(() => _incomeBreakdown = v),
+                    onNext: _next,
+                  ),
+                  _ExpensesPage(
+                    currency: _currency,
+                    onExpensesChanged: (v) => setState(() => _expenseAmounts = v),
+                    onNext: _next,
+                  ),
+                  _DebtsPage(
+                    currency: _currency,
+                    onDebtsChanged: (v) => setState(() => _debtEntries = v),
                     onNext: _next,
                   ),
                   _BucketPage(
@@ -1321,6 +1353,737 @@ class _NextButton extends StatelessWidget {
           child: const Text('Siguiente →'),
         ),
       ),
+    );
+  }
+}
+
+// ── Expense data ──────────────────────────────────────────────────
+
+class _ExpenseItem {
+  final String id;
+  final String emoji;
+  final String label;
+  final String group;
+  const _ExpenseItem({
+    required this.id,
+    required this.emoji,
+    required this.label,
+    required this.group,
+  });
+
+  static const _all = [
+    // Vivienda
+    _ExpenseItem(id: 'vivienda', emoji: '🏠', label: 'Arriendo / Cuota hipoteca', group: 'Vivienda'),
+    _ExpenseItem(id: 'admin', emoji: '🏢', label: 'Administración', group: 'Vivienda'),
+    // Servicios hogar
+    _ExpenseItem(id: 'agua', emoji: '💧', label: 'Agua y alcantarillado', group: 'Servicios hogar'),
+    _ExpenseItem(id: 'energia', emoji: '⚡', label: 'Energía eléctrica', group: 'Servicios hogar'),
+    _ExpenseItem(id: 'gas', emoji: '🔥', label: 'Gas natural', group: 'Servicios hogar'),
+    _ExpenseItem(id: 'internet', emoji: '📡', label: 'Internet hogar', group: 'Servicios hogar'),
+    _ExpenseItem(id: 'tv_cable', emoji: '📺', label: 'TV / Cable', group: 'Servicios hogar'),
+    // Servicios personales
+    _ExpenseItem(id: 'celular', emoji: '📱', label: 'Plan celular', group: 'Servicios personales'),
+    _ExpenseItem(id: 'transporte', emoji: '🚌', label: 'Transporte mensual', group: 'Servicios personales'),
+    // Suscripciones
+    _ExpenseItem(id: 'streaming', emoji: '🎬', label: 'Streaming (Netflix, Disney+...)', group: 'Suscripciones'),
+    _ExpenseItem(id: 'musica', emoji: '🎵', label: 'Música (Spotify...)', group: 'Suscripciones'),
+    _ExpenseItem(id: 'gym', emoji: '💪', label: 'Gimnasio / fitness', group: 'Suscripciones'),
+    _ExpenseItem(id: 'otras_subs', emoji: '🔄', label: 'Otras suscripciones', group: 'Suscripciones'),
+    // Alimentación
+    _ExpenseItem(id: 'mercado', emoji: '🛒', label: 'Mercado mensual', group: 'Alimentación'),
+    _ExpenseItem(id: 'restaurantes', emoji: '🍽️', label: 'Restaurantes / domicilios', group: 'Alimentación'),
+    // Educación
+    _ExpenseItem(id: 'educacion', emoji: '🎓', label: 'Colegio / universidad / pensión', group: 'Educación'),
+    _ExpenseItem(id: 'cursos', emoji: '📚', label: 'Cursos y capacitaciones', group: 'Educación'),
+    // Vehículo
+    _ExpenseItem(id: 'gasolina', emoji: '⛽', label: 'Gasolina mensual', group: 'Vehículo'),
+    _ExpenseItem(id: 'seg_vehiculo', emoji: '🚗', label: 'Seguro vehículo / SOAT', group: 'Vehículo'),
+    // Seguros
+    _ExpenseItem(id: 'medicina', emoji: '💊', label: 'Medicina prepagada / EPS voluntaria', group: 'Seguros'),
+    _ExpenseItem(id: 'seg_vida', emoji: '🛡️', label: 'Seguro de vida', group: 'Seguros'),
+  ];
+
+  static List<String> get groups =>
+      _all.map((e) => e.group).toSet().toList();
+
+  static List<_ExpenseItem> byGroup(String group) =>
+      _all.where((e) => e.group == group).toList();
+}
+
+// ── Expenses page ──────────────────────────────────────────────────
+
+class _ExpensesPage extends StatefulWidget {
+  final String currency;
+  final ValueChanged<Map<String, double>> onExpensesChanged;
+  final VoidCallback onNext;
+
+  const _ExpensesPage({
+    required this.currency,
+    required this.onExpensesChanged,
+    required this.onNext,
+  });
+
+  @override
+  State<_ExpensesPage> createState() => _ExpensesPageState();
+}
+
+class _ExpensesPageState extends State<_ExpensesPage> {
+  late final Map<String, TextEditingController> _ctrls;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrls = {for (final item in _ExpenseItem._all) item.id: TextEditingController()};
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrls.values) c.dispose();
+    super.dispose();
+  }
+
+  double _parse(String v) =>
+      double.tryParse(v.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0;
+
+  Map<String, double> get _expenseMap {
+    final map = <String, double>{};
+    for (final e in _ctrls.entries) {
+      final v = _parse(e.value.text);
+      if (v > 0) map[e.key] = v;
+    }
+    return map;
+  }
+
+  double get _total => _expenseMap.values.fold(0, (a, b) => a + b);
+
+  String _fmt(double v) {
+    if (widget.currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  void _notify() {
+    widget.onExpensesChanged(_expenseMap);
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final total = _total;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppConstants.defaultPadding, 20, AppConstants.defaultPadding, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('🧾', style: const TextStyle(fontSize: 40)).animate().fadeIn(),
+              const Gap(10),
+              Text('¿Cuánto gastas al mes?',
+                      style: theme.textTheme.headlineSmall)
+                  .animate().fadeIn(delay: 100.ms),
+              const Gap(4),
+              Text(
+                'Solo los gastos fijos y recurrentes. Deja en blanco los que no aplican.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark),
+              ).animate().fadeIn(delay: 150.ms),
+            ],
+          ),
+        ),
+        const Gap(8),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppConstants.defaultPadding),
+            itemCount: _ExpenseItem.groups.length,
+            itemBuilder: (ctx, gi) {
+              final group = _ExpenseItem.groups[gi];
+              final items = _ExpenseItem.byGroup(group);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Gap(16),
+                  Text(group,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      )),
+                  const Gap(6),
+                  ...items.map((item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Text(item.emoji,
+                                style: const TextStyle(fontSize: 16)),
+                            const Gap(8),
+                            Expanded(
+                              child: Text(item.label,
+                                  style: theme.textTheme.bodySmall
+                                      ?.copyWith(fontWeight: FontWeight.w500)),
+                            ),
+                            const Gap(8),
+                            SizedBox(
+                              width: 110,
+                              height: 38,
+                              child: TextField(
+                                controller: _ctrls[item.id],
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => _notify(),
+                                style: const TextStyle(fontSize: 13),
+                                decoration: InputDecoration(
+                                  prefixText:
+                                      widget.currency == 'COP' ? '\$ ' : 'USD ',
+                                  hintText: '0',
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 8),
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )),
+                ],
+              );
+            },
+          ),
+        ),
+        // Total bar
+        Container(
+          margin: const EdgeInsets.symmetric(
+              horizontal: AppConstants.defaultPadding),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              Text('Total gastos fijos:',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(
+                total > 0 ? _fmt(total) : '—',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Gap(8),
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppConstants.defaultPadding),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: widget.onNext,
+                    child: const Text('Omitir'),
+                  ),
+                ),
+              ),
+              const Gap(12),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      widget.onExpensesChanged(_expenseMap);
+                      widget.onNext();
+                    },
+                    child: Text(total > 0 ? 'Siguiente →' : 'Continuar sin gastos'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Gap(16),
+      ],
+    );
+  }
+}
+
+// ── Debt data ──────────────────────────────────────────────────────
+
+class _DebtEntry {
+  final String tempId;
+  String type;
+  String name;
+  double monthlyPayment;
+  double balance;
+
+  _DebtEntry({
+    required this.tempId,
+    this.type = 'tarjeta',
+    this.name = '',
+    this.monthlyPayment = 0,
+    this.balance = 0,
+  });
+
+  Map<String, dynamic> toMap() => {
+    'type': type,
+    'name': name,
+    'monthlyPayment': monthlyPayment,
+    'balance': balance,
+  };
+}
+
+const _debtTypes = [
+  (id: 'hipotecario', emoji: '🏠', label: 'Hipotecario'),
+  (id: 'vehiculo', emoji: '🚗', label: 'Vehículo'),
+  (id: 'estudio', emoji: '🎓', label: 'Educación'),
+  (id: 'tarjeta', emoji: '💳', label: 'Tarjeta crédito'),
+  (id: 'libre_inversion', emoji: '💰', label: 'Libre inversión'),
+  (id: 'libranza', emoji: '📋', label: 'Libranza'),
+  (id: 'rotativo', emoji: '🔄', label: 'Cupo rotativo'),
+  (id: 'personal', emoji: '🤝', label: 'Préstamo personal'),
+];
+
+// ── Debts page ──────────────────────────────────────────────────────
+
+class _DebtsPage extends StatefulWidget {
+  final String currency;
+  final ValueChanged<List<Map<String, dynamic>>> onDebtsChanged;
+  final VoidCallback onNext;
+
+  const _DebtsPage({
+    required this.currency,
+    required this.onDebtsChanged,
+    required this.onNext,
+  });
+
+  @override
+  State<_DebtsPage> createState() => _DebtsPageState();
+}
+
+class _DebtsPageState extends State<_DebtsPage> {
+  final List<_DebtEntry> _debts = [];
+  int _idCounter = 0;
+
+  void _addDebt() {
+    final entry = _DebtEntry(tempId: 'debt_${_idCounter++}');
+    _showDebtForm(entry, isNew: true);
+  }
+
+  void _editDebt(_DebtEntry entry) => _showDebtForm(entry, isNew: false);
+
+  void _removeDebt(String id) {
+    setState(() => _debts.removeWhere((d) => d.tempId == id));
+    widget.onDebtsChanged(_debts.map((d) => d.toMap()).toList());
+  }
+
+  void _showDebtForm(_DebtEntry entry, {required bool isNew}) {
+    final nameCtrl = TextEditingController(text: entry.name);
+    final payCtrl = TextEditingController(
+        text: entry.monthlyPayment > 0 ? entry.monthlyPayment.toStringAsFixed(0) : '');
+    final balCtrl = TextEditingController(
+        text: entry.balance > 0 ? entry.balance.toStringAsFixed(0) : '');
+    String selectedType = entry.type;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            final theme = Theme.of(ctx);
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20, right: 20, top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(isNew ? 'Agregar deuda' : 'Editar deuda',
+                          style: theme.textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const Gap(12),
+                  Text('Tipo de deuda:',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Gap(8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _debtTypes.map((dt) {
+                      final sel = dt.id == selectedType;
+                      return GestureDetector(
+                        onTap: () => setModal(() => selectedType = dt.id),
+                        child: AnimatedContainer(
+                          duration: AppConstants.animFast,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: sel
+                                ? AppColors.primarySurface
+                                : theme.cardColor,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: sel
+                                  ? AppColors.primary
+                                  : theme.dividerColor,
+                              width: sel ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Text('${dt.emoji} ${dt.label}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: sel
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: sel ? AppColors.primary : null,
+                              )),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const Gap(16),
+                  Text('Nombre / descripción:',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Gap(6),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'Ej: Tarjeta Davivienda, Crédito Bancolombia...',
+                    ),
+                  ),
+                  const Gap(14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Cuota mensual:',
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
+                            const Gap(6),
+                            TextField(
+                              controller: payCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                prefixText: widget.currency == 'COP'
+                                    ? '\$ '
+                                    : 'USD ',
+                                hintText: '0',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Gap(12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Saldo actual (opcional):',
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
+                            const Gap(6),
+                            TextField(
+                              controller: balCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                prefixText: widget.currency == 'COP'
+                                    ? '\$ '
+                                    : 'USD ',
+                                hintText: '0',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Gap(20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final pay = double.tryParse(payCtrl.text
+                                .replaceAll(RegExp(r'[^0-9.]'), '')) ??
+                            0;
+                        final bal = double.tryParse(balCtrl.text
+                                .replaceAll(RegExp(r'[^0-9.]'), '')) ??
+                            0;
+                        if (pay <= 0 && nameCtrl.text.trim().isEmpty) {
+                          Navigator.pop(ctx);
+                          return;
+                        }
+                        setState(() {
+                          entry.type = selectedType;
+                          entry.name = nameCtrl.text.trim().isEmpty
+                              ? _debtTypes
+                                    .firstWhere((d) => d.id == selectedType)
+                                    .label
+                              : nameCtrl.text.trim();
+                          entry.monthlyPayment = pay;
+                          entry.balance = bal;
+                          if (isNew) _debts.add(entry);
+                        });
+                        widget.onDebtsChanged(
+                            _debts.map((d) => d.toMap()).toList());
+                        Navigator.pop(ctx);
+                      },
+                      child: Text(isNew ? 'Agregar' : 'Guardar cambios'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _fmt(double v) {
+    if (widget.currency == 'COP') {
+      final s = v.toStringAsFixed(0);
+      return '\$ ${s.replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}';
+    }
+    return 'USD ${v.toStringAsFixed(2)}';
+  }
+
+  double get _totalPayments =>
+      _debts.fold(0, (a, d) => a + d.monthlyPayment);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppConstants.defaultPadding, 20, AppConstants.defaultPadding, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('💳', style: const TextStyle(fontSize: 40)).animate().fadeIn(),
+              const Gap(10),
+              Text('¿Tienes deudas?',
+                      style: theme.textTheme.headlineSmall)
+                  .animate().fadeIn(delay: 100.ms),
+              const Gap(4),
+              Text(
+                'Créditos, tarjetas, libranzas, cupos rotativos — todo lo que tienes en cuotas.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: AppColors.textSecondaryDark),
+              ).animate().fadeIn(delay: 150.ms),
+            ],
+          ),
+        ),
+        const Gap(12),
+        Expanded(
+          child: _debts.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('🎉',
+                          style: const TextStyle(fontSize: 48)).animate().fadeIn(),
+                      const Gap(12),
+                      Text('Sin deudas registradas',
+                          style: theme.textTheme.bodyLarge
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      const Gap(4),
+                      Text('Toca + para agregar una deuda',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppColors.textSecondaryDark)),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppConstants.defaultPadding),
+                  itemCount: _debts.length,
+                  separatorBuilder: (_, __) => const Gap(8),
+                  itemBuilder: (ctx, i) {
+                    final debt = _debts[i];
+                    final typeInfo = _debtTypes.firstWhere(
+                        (t) => t.id == debt.type,
+                        orElse: () => _debtTypes.last);
+                    return GestureDetector(
+                      onTap: () => _editDebt(debt),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: theme.cardColor,
+                          borderRadius: BorderRadius.circular(
+                              AppConstants.buttonRadius),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(typeInfo.emoji,
+                                style: const TextStyle(fontSize: 22)),
+                            const Gap(10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(debt.name,
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w600)),
+                                  Text(typeInfo.label,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                              color:
+                                                  AppColors.textSecondaryDark)),
+                                ],
+                              ),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(_fmt(debt.monthlyPayment),
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.error)),
+                                Text('/mes',
+                                    style: theme.textTheme.labelSmall
+                                        ?.copyWith(
+                                            color:
+                                                AppColors.textSecondaryDark)),
+                              ],
+                            ),
+                            const Gap(8),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline_rounded,
+                                  size: 18),
+                              color: theme.dividerColor,
+                              onPressed: () => _removeDebt(debt.tempId),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          ],
+                        ),
+                      ).animate(delay: (i * 50).ms).fadeIn().slideX(begin: 0.04),
+                    );
+                  },
+                ),
+        ),
+        // Add button
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppConstants.defaultPadding),
+          child: SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: OutlinedButton.icon(
+              onPressed: _addDebt,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Agregar deuda'),
+            ),
+          ),
+        ),
+        const Gap(8),
+        // Total
+        if (_debts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppConstants.defaultPadding),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.primarySurface,
+                borderRadius: BorderRadius.circular(10),
+                border:
+                    Border.all(color: AppColors.primary.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Text('Total cuotas mensuales:',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text(
+                    _fmt(_totalPayments),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const Gap(8),
+        Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppConstants.defaultPadding),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: widget.onNext,
+                    child: const Text('Omitir'),
+                  ),
+                ),
+              ),
+              const Gap(12),
+              Expanded(
+                flex: 2,
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      widget.onDebtsChanged(
+                          _debts.map((d) => d.toMap()).toList());
+                      widget.onNext();
+                    },
+                    child: Text(_debts.isEmpty
+                        ? 'No tengo deudas →'
+                        : 'Siguiente →'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Gap(16),
+      ],
     );
   }
 }
