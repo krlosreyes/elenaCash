@@ -115,8 +115,7 @@ class _OnboardingShellScreenState extends ConsumerState<OnboardingShellScreen> {
             ? _computeDiagnosis(((totalExpenses + totalDebtPayments) /
                         _totalIncome *
                         100)
-                    .clamp(0, 100)
-                    .toDouble())
+                    .clamp(0.0, 100.0))
                 .name
             : 'unknown',
         'updatedAt': FieldValue.serverTimestamp(),
@@ -2524,7 +2523,7 @@ class _DiagnosisPageState extends State<_DiagnosisPage> {
         ? ((widget.totalExpenses + widget.totalDebtPayments) /
                 widget.totalIncome *
                 100)
-            .clamp(0, 100)
+            .clamp(0.0, 100.0)
         : 55.0;
     final rec = _recommendBuckets(commitPct, widget.richLifeCategories);
     _fixedPct = rec.$1;
@@ -2551,8 +2550,8 @@ class _DiagnosisPageState extends State<_DiagnosisPage> {
     final debt = widget.totalDebtPayments;
     final committed = expenses + debt;
     final available = income - committed;
-    final commitPct = income > 0 ? (committed / income * 100).clamp(0, 100) : 0.0;
-    final diagnosis = _computeDiagnosis(commitPct.toDouble());
+    final commitPct = income > 0 ? (committed / income * 100).clamp(0.0, 100.0) : 0.0;
+    final diagnosis = _computeDiagnosis(commitPct);
     final total = _fixedPct + _savPct + _invPct + _freePct;
 
     return ListView(
@@ -2661,7 +2660,7 @@ class _DiagnosisPageState extends State<_DiagnosisPage> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        '${_pct(100 - commitPct.clamp(0, 100))}',
+                        _pct(100.0 - commitPct),
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
